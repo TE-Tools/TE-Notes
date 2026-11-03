@@ -2,7 +2,7 @@ import { jsPDF } from 'jspdf';
 import { zipSync } from 'fflate';
 import type { InkPage, Note } from '../db/types';
 import { BitmapCache } from './assets';
-import { HIGHLIGHTER_ALPHA, renderPageToCanvas, strokeOutline } from './render';
+import { HIGHLIGHTER_ALPHA, renderPageToCanvas, strokeOutline, taskAreaLayout } from './render';
 import { blobToDataUrl } from '../lib/images';
 import { db } from '../db/db';
 
@@ -73,6 +73,42 @@ export async function exportInkPdf(note: Note, pages: InkPage[]): Promise<Blob> 
       } else if (page.background === 'dots') {
         pdf.setFillColor(195, 202, 214);
         for (let y = 25; y < page.height; y += 24) for (let x = 25; x < page.width; x += 24) pdf.circle(x * k, y * k, 1.0, 'F');
+      }
+    }
+
+    if (page.tasks) {
+      const { top, bottom, rows } = taskAreaLayout(page, page.tasks);
+      pdf.setFillColor(255, 255, 255);
+      pdf.rect(36 * k, (top - 6) * k, (page.width - 72) * k, (bottom - top + 12) * k, 'F');
+      pdf.setDrawColor(201, 209, 221);
+      pdf.setLineWidth(0.75);
+      pdf.line(44 * k, top * k, (page.width - 40) * k, top * k);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(11);
+      pdf.setTextColor(107, 114, 128);
+      pdf.text('AUFGABEN', 52 * k, (top + 24) * k, { baseline: 'middle' });
+      for (const r of rows) {
+        const b = r.box;
+        const done = !!page.tasks.checked[r.index];
+        pdf.setDrawColor(213, 219, 229);
+        pdf.setLineWidth(0.6);
+        pdf.line(r.lineX0 * k, r.lineY * k, r.lineX1 * k, r.lineY * k);
+        pdf.setLineWidth(1.5);
+        if (done) {
+          pdf.setDrawColor(22, 163, 74);
+          pdf.setFillColor(220, 252, 231);
+        } else {
+          pdf.setDrawColor(123, 132, 148);
+          pdf.setFillColor(255, 255, 255);
+        }
+        pdf.roundedRect(b.x * k, b.y * k, b.s * k, b.s * k, 4 * k, 4 * k, 'FD');
+        if (done) {
+          pdf.setLineWidth(2.4);
+          pdf.setLineCap('round');
+          pdf.setLineJoin('round');
+          pdf.lines([[b.s * 0.21 * k, b.s * 0.21 * k], [b.s * 0.37 * k, -b.s * 0.46 * k]], (b.x + b.s * 0.22) * k, (b.y + b.s * 0.53) * k, [1, 1], 'S', false);
+          pdf.setLineCap('butt');
+        }
       }
     }
 

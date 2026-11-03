@@ -75,7 +75,15 @@ export interface InkPage {
   bgAttachmentId: string | null;
   strokes: Stroke[];
   images: InkImage[];
+  /** Aufgabenbereich unten auf der Seite: je Zeile Kästchen + Schreiblinie */
+  tasks?: InkTaskArea | null;
   updatedAt: number;
+}
+
+export interface InkTaskArea {
+  rows: number;
+  /** Abgehakte Zeilen (Index = Zeile) */
+  checked: boolean[];
 }
 
 export type AttachmentKind = 'file' | 'inkbg' | 'inkimg';

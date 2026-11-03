@@ -1,5 +1,5 @@
 import { getStroke } from 'perfect-freehand';
-import type { InkImage, InkPage, PageBackground, Stroke } from '../db/types';
+import type { InkImage, InkPage, InkTaskArea, PageBackground, Stroke } from '../db/types';
 
 /* ------------------------------------------------------------------ */
 /* Geometrie                                                           */
@@ -188,6 +188,110 @@ export function drawPattern(ctx: CanvasRenderingContext2D, kind: PageBackground,
   ctx.restore();
 }
 
+/* ------------------------------------------------------------------ */
+/* Aufgabenbereich (unten auf der Seite)                               */
+/* ------------------------------------------------------------------ */
+
+export const TASK_ROW_H = 52;
+const TASK_HEAD_H = 44;
+const TASK_MARGIN = 40;
+const TASK_BOX = 26;
+const TASK_X = 52;
+
+export interface TaskRowLayout {
+  index: number;
+  box: { x: number; y: number; s: number };
+  lineY: number;
+  lineX0: number;
+  lineX1: number;
+}
+
+export function maxTaskRows(page: Pick<InkPage, 'height'>) {
+  return Math.max(1, Math.floor((page.height - 2 * TASK_MARGIN - TASK_HEAD_H - 120) / TASK_ROW_H));
+}
+
+/** Lage des Aufgabenbereichs in Seitenkoordinaten */
+export function taskAreaLayout(page: Pick<InkPage, 'width' | 'height'>, area: InkTaskArea) {
+  const rows = Math.max(1, Math.min(area.rows, maxTaskRows(page)));
+  const bottom = page.height - TASK_MARGIN;
+  const top = bottom - TASK_HEAD_H - rows * TASK_ROW_H;
+  const items: TaskRowLayout[] = [];
+  for (let i = 0; i < rows; i++) {
+    const rowTop = top + TASK_HEAD_H + i * TASK_ROW_H;
+    const by = rowTop + (TASK_ROW_H - TASK_BOX) / 2;
+    items.push({
+      index: i,
+      box: { x: TASK_X, y: by, s: TASK_BOX },
+      lineY: by + TASK_BOX,
+      lineX0: TASK_X + TASK_BOX + 18,
+      lineX1: page.width - 48
+    });
+  }
+  return { top, bottom, rows: items };
+}
+
+/** Index des getroffenen Kästchens oder -1 (großzügige Trefferfläche für Finger/Pencil) */
+export function hitTaskBox(page: InkPage, x: number, y: number, tol = 10): number {
+  if (!page.tasks) return -1;
+  for (const r of taskAreaLayout(page, page.tasks).rows) {
+    const b = r.box;
+    if (x >= b.x - tol && x <= b.x + b.s + tol && y >= b.y - tol && y <= b.y + b.s + tol) return r.index;
+  }
+  return -1;
+}
+
+export function drawTaskArea(ctx: CanvasRenderingContext2D, page: InkPage, unit = 1) {
+  const area = page.tasks;
+  if (!area) return;
+  const { top, bottom, rows } = taskAreaLayout(page, area);
+  ctx.save();
+  // Untergrund des Bereichs (überdeckt Linien/Karos des Seitenhintergrunds)
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(TASK_X - 16, top - 6, page.width - 2 * (TASK_X - 16), bottom - top + 12);
+  ctx.strokeStyle = '#c9d1dd';
+  ctx.lineWidth = Math.max(0.8, unit);
+  ctx.beginPath();
+  ctx.moveTo(TASK_X - 8, top);
+  ctx.lineTo(page.width - 40, top);
+  ctx.stroke();
+  ctx.fillStyle = '#6b7280';
+  ctx.font = '600 15px -apple-system, "Segoe UI", Roboto, sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('AUFGABEN', TASK_X, top + TASK_HEAD_H / 2 + 2);
+  for (const r of rows) {
+    const b = r.box;
+    const done = !!area.checked[r.index];
+    // Schreiblinie
+    ctx.strokeStyle = '#d5dbe5';
+    ctx.lineWidth = Math.max(0.6, unit * 0.9);
+    ctx.beginPath();
+    ctx.moveTo(r.lineX0, r.lineY);
+    ctx.lineTo(r.lineX1, r.lineY);
+    ctx.stroke();
+    // Kästchen
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = done ? '#16a34a' : '#7b8494';
+    ctx.fillStyle = done ? '#dcfce7' : '#ffffff';
+    ctx.beginPath();
+    if (typeof (ctx as unknown as { roundRect?: unknown }).roundRect === 'function') ctx.roundRect(b.x, b.y, b.s, b.s, 5);
+    else ctx.rect(b.x, b.y, b.s, b.s);
+    ctx.fill();
+    ctx.stroke();
+    if (done) {
+      ctx.strokeStyle = '#16a34a';
+      ctx.lineWidth = 3.2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(b.x + b.s * 0.22, b.y + b.s * 0.53);
+      ctx.lineTo(b.x + b.s * 0.43, b.y + b.s * 0.74);
+      ctx.lineTo(b.x + b.s * 0.8, b.y + b.s * 0.28);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
 export function drawStroke(ctx: CanvasRenderingContext2D, s: Stroke, path?: Path2D) {
   const p = path ?? strokePath(s);
   ctx.fillStyle = s.color;
@@ -224,6 +328,7 @@ export function drawPageContent(
   unit = 1
 ) {
   drawBackground(ctx, page, page.bgAttachmentId ? cache.get(page.bgAttachmentId) ?? null : null, unit);
+  drawTaskArea(ctx, page, unit);
   drawImages(ctx, page.images, cache);
   for (const s of page.strokes) {
     if (visible) {

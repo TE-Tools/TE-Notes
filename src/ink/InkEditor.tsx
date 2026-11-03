@@ -2,13 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import Dexie from 'dexie';
 import {
   Eraser, FilePlus2, FileUp, Hand, Highlighter, ImagePlus, Maximize2, MousePointer2, PenTool, Redo2, Trash2, Undo2,
-  ZoomIn, ZoomOut, LayoutTemplate, Fingerprint
+  ZoomIn, ZoomOut, LayoutTemplate, Fingerprint, ListChecks
 } from 'lucide-react';
 import { db } from '../db/db';
 import { addAttachment, newInkPage, setSetting, updateNote } from '../db/repo';
-import type { InkImage, InkPage, InkTool, Note, PageBackground, Stroke } from '../db/types';
+import type { InkImage, InkPage, InkTaskArea, InkTool, Note, PageBackground, Stroke } from '../db/types';
 import { BitmapCache } from './assets';
-import { drawPageContent, drawStroke, hitStroke, layoutPages, outlineToPath, strokeOutline, type PageLayout } from './render';
+import { drawPageContent, drawStroke, hitStroke, hitTaskBox, layoutPages, maxTaskRows, outlineToPath, strokeOutline, type PageLayout } from './render';
 import { renderPdf } from './pdfImport';
 import { pickFiles } from '../components/FileSave';
 import { confirmDialog, MenuButton, Modal, toast, toastError } from '../components/ui';
@@ -25,7 +25,10 @@ type Command =
   | { t: 'img-add'; pageId: string; image: InkImage }
   | { t: 'img-change'; pageId: string; before: InkImage; after: InkImage }
   | { t: 'img-del'; pageId: string; image: InkImage; index: number }
-  | { t: 'clear'; pageId: string; strokes: Stroke[]; images: InkImage[] };
+  | { t: 'clear'; pageId: string; strokes: Stroke[]; images: InkImage[] }
+  | { t: 'tasks'; pageId: string; before: InkTaskArea | null; after: InkTaskArea | null };
+
+const DEFAULT_TASK_ROWS = 6;
 
 const PEN_SIZES = [1.6, 2.6, 4.2];
 const HL_SIZES = [12, 18, 28];
@@ -385,6 +388,9 @@ export function InkEditor({ note }: { note: Note }) {
         });
         setSelected(null);
         break;
+      case 'tasks':
+        updatePage(c.pageId, (p) => ({ ...p, tasks: reverse ? c.before : c.after }));
+        break;
       case 'clear':
         updatePage(c.pageId, (p) => (reverse ? { ...p, strokes: c.strokes, images: c.images } : { ...p, strokes: [], images: [] }));
         break;
@@ -444,6 +450,23 @@ export function InkEditor({ note }: { note: Note }) {
   const lastPenUp = useRef(0);
 
   const isDrawTool = (t: Tool) => t === 'pen' || t === 'highlighter' || t === 'eraser';
+
+  /** Tippen auf ein Aufgaben-Kästchen: Haken setzen/entfernen. true, wenn getroffen. */
+  const toggleTaskAt = (clientX: number, clientY: number) => {
+    const w = toWorld(clientX, clientY);
+    const idx = pageAt(w.x, w.y);
+    if (idx < 0) return false;
+    const { page, top } = layoutRef.current[idx];
+    const row = hitTaskBox(page, w.x, w.y - top, 10 / Math.max(0.6, viewRef.current.z));
+    if (row < 0 || !page.tasks) return false;
+    const before = page.tasks;
+    const checked = [...before.checked];
+    checked[row] = !checked[row];
+    const cmd: Command = { t: 'tasks', pageId: page.id, before, after: { ...before, checked } };
+    applyCommand(cmd, false);
+    pushCommand(cmd);
+    return true;
+  };
 
   const startStroke = (e: PointerEvent, isTouch: boolean) => {
     const w = toWorld(e.clientX, e.clientY);
@@ -580,6 +603,7 @@ export function InkEditor({ note }: { note: Note }) {
           return;
         }
         if (touches.current.size > 2) return;
+        if (touches.current.size === 1 && t !== 'hand' && t !== 'eraser' && toggleTaskAt(e.clientX, e.clientY)) return;
         const fingerDraws = optsRef.current.fingerDraws && t !== 'hand' && t !== 'select';
         if (fingerDraws) {
           if (t === 'eraser') {
@@ -609,6 +633,7 @@ export function InkEditor({ note }: { note: Note }) {
         panRef.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY };
         return;
       }
+      if (t !== 'eraser' && !(isPen && e.button === 5) && toggleTaskAt(e.clientX, e.clientY)) return;
       if (t === 'select') return selectAt(e.clientX, e.clientY);
       if (t === 'eraser' || (isPen && e.button === 5)) {
         eraseRef.current = { pointerId: e.pointerId, items: [] };
@@ -845,6 +870,7 @@ export function InkEditor({ note }: { note: Note }) {
     saveDebounced.flush();
     const cur = curPage();
     const p = newInkPage(note.id, 0, cur && !cur.bgAttachmentId ? cur.background : settings.defaultPageBackground);
+    if (cur?.tasks) p.tasks = { rows: cur.tasks.rows, checked: [] };
     const pages = [...pagesRef.current];
     pages.splice(currentPage + 1, 0, p);
     await reindexPages(pages);
@@ -887,6 +913,20 @@ export function InkEditor({ note }: { note: Note }) {
     applyCommand(cmd, false);
     pushCommand(cmd);
     toast('Seite geleert', { action: { label: 'Rückgängig', run: undo } });
+  };
+
+  const setTaskArea = (next: InkTaskArea | null) => {
+    const p = curPage();
+    const cmd: Command = { t: 'tasks', pageId: p.id, before: p.tasks ?? null, after: next };
+    applyCommand(cmd, false);
+    pushCommand(cmd);
+  };
+  const changeTaskRows = (delta: number) => {
+    const p = curPage();
+    if (!p.tasks) return;
+    const rows = clamp(p.tasks.rows + delta, 1, maxTaskRows(p));
+    if (rows === p.tasks.rows) return;
+    setTaskArea({ rows, checked: p.tasks.checked.slice(0, rows) });
   };
 
   const setBackground = (bg: PageBackground, all: boolean) => {
@@ -954,6 +994,7 @@ export function InkEditor({ note }: { note: Note }) {
   /* ---------------------------------------------------------------- */
 
   const colors = settings.penColors;
+  const curPageTasks = !!pagesRef.current[Math.min(currentPage, pagesRef.current.length - 1)]?.tasks;
   const toolBtn = (t: Tool, icon: JSX.Element, label: string) => (
     <button className={'icon-btn' + (tool === t ? ' active' : '')} onClick={() => setTool(t)} title={label} aria-label={label} aria-pressed={tool === t}>
       {icon}
@@ -1030,6 +1071,14 @@ export function InkEditor({ note }: { note: Note }) {
               { label: 'Blanko', icon: <LayoutTemplate size={17} />, onClick: () => setBackground('blank', false) },
               { label: 'Hintergrund für alle Seiten: liniert', onClick: () => setBackground('lines', true) },
               { label: 'Hintergrund für alle Seiten: kariert', onClick: () => setBackground('grid', true) },
+              'sep',
+              ...(curPageTasks
+                ? [
+                    { label: 'Aufgabenzeile hinzufügen', icon: <ListChecks size={17} />, onClick: () => changeTaskRows(1) },
+                    { label: 'Aufgabenzeile entfernen', icon: <ListChecks size={17} />, onClick: () => changeTaskRows(-1) },
+                    { label: 'Aufgabenbereich entfernen', icon: <ListChecks size={17} />, onClick: () => setTaskArea(null) }
+                  ]
+                : [{ label: 'Aufgabenbereich unten einfügen', icon: <ListChecks size={17} />, onClick: () => setTaskArea({ rows: DEFAULT_TASK_ROWS, checked: [] }) }]),
               'sep',
               { label: 'Seite leeren', icon: <Eraser size={17} />, onClick: clearPage },
               { label: 'Seite löschen', icon: <Trash2 size={17} />, onClick: deletePage, danger: true }

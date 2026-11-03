@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import { cursorFallbackMiddleware } from './cursorFallback';
 import type {
   Attachment, Category, Folder, InkPage, MeetingInfo, Note, NoteBody, Project, SearchEntry, Setting, Task
 } from './types';
@@ -26,6 +27,8 @@ export class TeNotesDB extends Dexie {
 
   constructor(name = DB_NAME) {
     super(name);
+    // Safari-Ausweichweg bei „UnknownError: Unable to open cursor“
+    this.use(cursorFallbackMiddleware);
     this.version(1).stores({
       notes: 'id, type, updatedAt, createdAt, pinned, archived, archivedAt, deletedAt, categoryId, projectId, folderId, *tags',
       bodies: 'id',
