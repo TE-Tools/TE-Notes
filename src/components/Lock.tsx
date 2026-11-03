@@ -81,7 +81,7 @@ export function LockGate({ children }: { children: ReactNode }) {
   return (
     <>
       {/* Beim Start gesperrt: Inhalte gar nicht erst laden */}
-      {(!locked || hiddenAt.current > 0) && <div style={locked ? { visibility: 'hidden' } : undefined}>{children}</div>}
+      {(!locked || hiddenAt.current > 0) && <div className="lock-gate" style={locked ? { visibility: 'hidden' } : undefined}>{children}</div>}
       {locked && settings.lockEnabled && <LockScreen onUnlock={() => setLocked(false)} />}
     </>
   );

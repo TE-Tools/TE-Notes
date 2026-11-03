@@ -83,6 +83,7 @@ a { color: var(--accent); }
 ::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
 
 /* ---------- Layout ---------- */
+.lock-gate { height: 100%; }
 .app { display: flex; height: 100%; overflow: hidden; }
 .main {
   flex: 1;
@@ -579,7 +580,7 @@ a { color: var(--accent); }
 /* ---------- Druck ---------- */
 @media print {
   .sidebar, .bottom-nav, .editor-top, .rt-toolbar, .attachments button, .no-print { display: none !important; }
-  .app, .main, .editor-page, .editor-scroll { overflow: visible !important; height: auto !important; display: block !important; }
+  .lock-gate, .app, .main, .editor-page, .editor-scroll { overflow: visible !important; height: auto !important; display: block !important; }
   body { background: #fff; color: #000; }
 }
 
