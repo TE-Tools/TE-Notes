@@ -50,7 +50,7 @@ export function fmtRelative(ts: number): string {
 
 /** Parst YYYY-MM-DD bzw. YYYY-MM-DDTHH:mm als lokale Zeit */
 export function parseLocal(s: string): Date {
-  const [datePart, timePart] = s.split('T');
+  const [datePart, timePart] = String(s ?? '').split('T');
   const [y, m, d] = datePart.split('-').map(Number);
   const [hh, mm] = (timePart ?? '00:00').split(':').map(Number);
   return new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0);

@@ -1,6 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import type {
-  Attachment, Category, Folder, InkPage, Note, NoteBody, Project, SearchEntry, Setting, Task
+  Attachment, Category, Folder, InkPage, MeetingInfo, Note, NoteBody, Project, SearchEntry, Setting, Task
 } from './types';
 
 export const DB_NAME = 'te-notes';
@@ -57,7 +57,35 @@ export class TeNotesDB extends Dexie {
             }
           });
       });
+
+    // Beim Lesen unvollständige Besprechungsdaten (ältere Versionen, Importe) ergänzen,
+    // damit einzelne fehlerhafte Einträge keine Seite zum Absturz bringen.
+    this.notes.hook('reading', (n: Note) => normalizeNote(n));
   }
+}
+
+const str = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+const strList = (v: unknown) => (Array.isArray(v) ? v.filter((x) => x != null).map(str) : []);
+
+/** Fehlende oder falsch typisierte Felder einer Notiz auffüllen */
+export function normalizeNote(n: Note): Note {
+  if (!n) return n;
+  if (!Array.isArray(n.tags)) n.tags = strList(n.tags);
+  if (typeof n.title !== 'string') n.title = str(n.title);
+  if (n.type === 'meeting') {
+    const m = (n.meeting ?? {}) as Partial<MeetingInfo>;
+    let date = str(m.date);
+    if (date && isNaN(new Date(date.length <= 10 ? date + 'T00:00' : date).getTime())) date = '';
+    n.meeting = {
+      date,
+      participants: strList(m.participants),
+      topic: str(m.topic),
+      location: str(m.location),
+      decisions: strList(m.decisions),
+      followUpDate: typeof m.followUpDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(m.followUpDate) ? m.followUpDate : null
+    };
+  }
+  return n;
 }
 
 export const DB_SCHEMA_VERSION = 2;

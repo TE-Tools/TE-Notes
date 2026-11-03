@@ -114,7 +114,8 @@ export default function NotesPage({ variant }: { variant: NotesVariant }) {
     const fmt = new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' });
     const map = new Map<string, Note[]>();
     for (const n of notes) {
-      const k = n.meeting?.date ? fmt.format(parseLocal(n.meeting.date)) : 'Ohne Datum';
+      const d = n.meeting?.date ? parseLocal(n.meeting.date) : null;
+      const k = d && !isNaN(d.getTime()) ? fmt.format(d) : 'Ohne Datum';
       if (!map.has(k)) map.set(k, []);
       map.get(k)!.push(n);
     }
