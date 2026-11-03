@@ -77,10 +77,33 @@ export default function NotesPage({ variant }: { variant: NotesVariant }) {
       const notes = r.notes.filter(pred).sort((a, b) => (b.meeting?.date ?? '').localeCompare(a.meeting?.date ?? ''));
       return { notes: notes.slice(0, limit), more: notes.length > limit };
     }
+    // Besprechungen ohne Cursor über den Index „meeting.date“ laden: Safari meldet dort
+    // „UnknownError: Unable to open cursor“. Stattdessen alle Besprechungen holen und hier sortieren.
+    if (variant === 'meetings') {
+      const all = (await db.notes.where('type').equals('meeting').toArray())
+        .filter(pred)
+        .sort((a, b) => (b.meeting?.date ?? '').localeCompare(a.meeting?.date ?? '') || b.updatedAt - a.updatedAt);
+      return { notes: all.slice(0, limit), more: all.length > limit };
+    }
+    try {
+      return await queryNotes();
+    } catch (e) {
+      // Ausweichweg bei IndexedDB-Fehlern (v. a. Safari): ohne Index-Cursor lesen und hier sortieren
+      console.warn('Notizliste: Ausweichabfrage wegen', e);
+      const key = variant === 'trash' ? 'deletedAt' : variant === 'archive' ? 'archivedAt' : sort === 'title' ? 'title' : sort;
+      const all = (await db.notes.toArray()).filter(pred).sort((a, b) =>
+        key === 'title'
+          ? (a.title || '').localeCompare(b.title || '', 'de')
+          : ((b as unknown as Record<string, number>)[key] ?? 0) - ((a as unknown as Record<string, number>)[key] ?? 0)
+      );
+      return { notes: all.slice(0, limit), more: all.length > limit };
+    }
+  }, [variant, sort, pred, limit, mq, from, to]);
+
+  async function queryNotes() {
     let coll;
     if (variant === 'trash') coll = db.notes.where('deletedAt').above(0).reverse();
     else if (variant === 'archive') coll = db.notes.orderBy('archivedAt').reverse();
-    else if (variant === 'meetings') coll = db.notes.orderBy('meeting.date').reverse();
     else if (sort === 'title') coll = db.notes.toCollection();
     else coll = db.notes.orderBy(sort).reverse();
     if (sort === 'title' && variant !== 'trash' && variant !== 'archive' && variant !== 'meetings') {
@@ -89,7 +112,7 @@ export default function NotesPage({ variant }: { variant: NotesVariant }) {
     }
     const notes = await coll.filter(pred).limit(limit + 1).toArray();
     return { notes: notes.slice(0, limit), more: notes.length > limit };
-  }, [variant, sort, pred, limit, mq, from, to]);
+  }
 
   const trashedTasks = useLiveQuery(() => (variant === 'trash' ? db.tasks.where('deletedAt').above(0).reverse().sortBy('deletedAt') : []), [variant]);
 
