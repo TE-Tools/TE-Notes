@@ -207,7 +207,7 @@ export interface TaskRowLayout {
 }
 
 export function maxTaskRows(page: Pick<InkPage, 'height'>) {
-  return Math.max(1, Math.floor((page.height - 2 * TASK_MARGIN - TASK_HEAD_H - 120) / TASK_ROW_H));
+  return Math.max(1, Math.floor((page.height - 2 * TASK_MARGIN - TASK_HEAD_H) / TASK_ROW_H));
 }
 
 /** Lage des Aufgabenbereichs in Seitenkoordinaten */
@@ -230,6 +230,40 @@ export function taskAreaLayout(page: Pick<InkPage, 'width' | 'height'>, area: In
   return { top, bottom, rows: items };
 }
 
+const CTRL_R = 17;
+/** Knöpfe „−“/„+“ rechts in der Kopfzeile des Aufgabenbereichs */
+export function taskControls(page: Pick<InkPage, 'width' | 'height'>, area: InkTaskArea) {
+  const { top } = taskAreaLayout(page, area);
+  const cy = top + TASK_HEAD_H / 2 + 2;
+  const right = page.width - 48;
+  return { add: { x: right - CTRL_R, y: cy }, remove: { x: right - CTRL_R * 2 - 14 - CTRL_R, y: cy }, r: CTRL_R };
+}
+
+export function hitTaskControl(page: InkPage, x: number, y: number, tol = 8): 'add' | 'remove' | null {
+  if (!page.tasks) return null;
+  const c = taskControls(page, page.tasks);
+  if (Math.hypot(x - c.add.x, y - c.add.y) <= c.r + tol) return 'add';
+  if (Math.hypot(x - c.remove.x, y - c.remove.y) <= c.r + tol) return 'remove';
+  return null;
+}
+
+/** Zeile, zu der ein Strich gehört (Mitte des Strichs liegt in der Zeile, rechts vom Kästchen), sonst -1 */
+export function taskRowOfStroke(page: InkPage, s: Stroke): number {
+  if (!page.tasks) return -1;
+  const b = strokeBounds(s);
+  const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+  for (const r of taskAreaLayout(page, page.tasks).rows) {
+    const rowTop = r.box.y - (TASK_ROW_H - TASK_BOX) / 2;
+    if (cy >= rowTop && cy < rowTop + TASK_ROW_H && cx > r.box.x + r.box.s) return r.index;
+  }
+  return -1;
+}
+
+/** Oberkante einer Zeile (zum Verschieben von Strichen zwischen Seiten) */
+export function taskRowTop(row: TaskRowLayout) {
+  return row.box.y - (TASK_ROW_H - TASK_BOX) / 2;
+}
+
 /** Index des getroffenen Kästchens oder -1 (großzügige Trefferfläche für Finger/Pencil) */
 export function hitTaskBox(page: InkPage, x: number, y: number, tol = 10): number {
   if (!page.tasks) return -1;
@@ -240,7 +274,7 @@ export function hitTaskBox(page: InkPage, x: number, y: number, tol = 10): numbe
   return -1;
 }
 
-export function drawTaskArea(ctx: CanvasRenderingContext2D, page: InkPage, unit = 1) {
+export function drawTaskArea(ctx: CanvasRenderingContext2D, page: InkPage, unit = 1, controls = false) {
   const area = page.tasks;
   if (!area) return;
   const { top, bottom, rows } = taskAreaLayout(page, area);
@@ -258,6 +292,28 @@ export function drawTaskArea(ctx: CanvasRenderingContext2D, page: InkPage, unit 
   ctx.font = '600 15px -apple-system, "Segoe UI", Roboto, sans-serif';
   ctx.textBaseline = 'middle';
   ctx.fillText('AUFGABEN', TASK_X, top + TASK_HEAD_H / 2 + 2);
+  // Knöpfe „−“ / „+“ für weitere Zeilen (nur im Editor, nicht im Export)
+  const c = taskControls(page, area);
+  for (const [pt, plus] of controls ? ([[c.remove, false], [c.add, true]] as const) : []) {
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, c.r, 0, Math.PI * 2);
+    ctx.fillStyle = '#f1f3f6';
+    ctx.fill();
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = '#c9d1dd';
+    ctx.stroke();
+    ctx.strokeStyle = '#4b5563';
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(pt.x - 7, pt.y);
+    ctx.lineTo(pt.x + 7, pt.y);
+    if (plus) {
+      ctx.moveTo(pt.x, pt.y - 7);
+      ctx.lineTo(pt.x, pt.y + 7);
+    }
+    ctx.stroke();
+  }
   for (const r of rows) {
     const b = r.box;
     const done = !!area.checked[r.index];
@@ -325,10 +381,11 @@ export function drawPageContent(
   page: InkPage,
   cache: Map<string, CanvasImageSource>,
   visible?: Bounds,
-  unit = 1
+  unit = 1,
+  editing = false
 ) {
   drawBackground(ctx, page, page.bgAttachmentId ? cache.get(page.bgAttachmentId) ?? null : null, unit);
-  drawTaskArea(ctx, page, unit);
+  drawTaskArea(ctx, page, unit, editing);
   drawImages(ctx, page.images, cache);
   for (const s of page.strokes) {
     if (visible) {

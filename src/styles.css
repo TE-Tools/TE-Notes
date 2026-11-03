@@ -632,6 +632,10 @@ a { color: var(--accent); }
   background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--border); border-radius: 99px; padding: 4px 12px; font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums;
 }
+/* Vollbild für Handschrift */
+.ink-fullscreen .sidebar, .ink-fullscreen .scrim, .ink-fullscreen .bottom-nav, .ink-fullscreen .editor-top, .ink-fullscreen .update-bar { display: none !important; }
+.ink-fullscreen .editor-page .ink-stage { margin-bottom: 0 !important; }
+.ink-fullscreen .ink-toolbar { padding-top: calc(4px + var(--safe-top)); }
 .ink-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-3); }
 @media (max-width: 767px) {
   .ink-group { padding: 0 3px; }

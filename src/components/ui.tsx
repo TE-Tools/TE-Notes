@@ -57,6 +57,7 @@ interface ConfirmReq {
   title: string;
   text?: ReactNode;
   confirmLabel?: string;
+  cancelLabel?: string;
   danger?: boolean;
   resolve: (ok: boolean) => void;
 }
@@ -117,7 +118,7 @@ export function GlobalUI() {
                   confirmStore.set(null);
                 }}
               >
-                Abbrechen
+                {confirm.cancelLabel ?? 'Abbrechen'}
               </button>
               <button
                 className={'btn ' + (confirm.danger ? 'btn-danger-solid' : 'btn-primary')}

@@ -2,13 +2,16 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import Dexie from 'dexie';
 import {
   Eraser, FilePlus2, FileUp, Hand, Highlighter, ImagePlus, Maximize2, MousePointer2, PenTool, Redo2, Trash2, Undo2,
-  ZoomIn, ZoomOut, LayoutTemplate, Fingerprint, ListChecks
+  ZoomIn, ZoomOut, LayoutTemplate, Fingerprint, ListChecks, Expand, Shrink
 } from 'lucide-react';
 import { db } from '../db/db';
 import { addAttachment, newInkPage, setSetting, updateNote } from '../db/repo';
 import type { InkImage, InkPage, InkTaskArea, InkTool, Note, PageBackground, Stroke } from '../db/types';
 import { BitmapCache } from './assets';
-import { drawPageContent, drawStroke, hitStroke, hitTaskBox, layoutPages, maxTaskRows, outlineToPath, strokeOutline, type PageLayout } from './render';
+import {
+  drawPageContent, drawStroke, hitStroke, hitTaskBox, hitTaskControl, layoutPages, maxTaskRows, outlineToPath, strokeOutline,
+  taskAreaLayout, taskRowOfStroke, taskRowTop, type PageLayout
+} from './render';
 import { renderPdf } from './pdfImport';
 import { pickFiles } from '../components/FileSave';
 import { confirmDialog, MenuButton, Modal, toast, toastError } from '../components/ui';
@@ -28,7 +31,7 @@ type Command =
   | { t: 'clear'; pageId: string; strokes: Stroke[]; images: InkImage[] }
   | { t: 'tasks'; pageId: string; before: InkTaskArea | null; after: InkTaskArea | null };
 
-const DEFAULT_TASK_ROWS = 6;
+const DEFAULT_TASK_ROWS = 10;
 
 const PEN_SIZES = [1.6, 2.6, 4.2];
 const HL_SIZES = [12, 18, 28];
@@ -65,6 +68,31 @@ export function InkEditor({ note }: { note: Note }) {
   const [pageCount, setPageCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
   const [zoomPct, setZoomPct] = useState(100);
+  const [fullscreen, setFullscreen] = useState(false);
+  const nativeFs = useRef(false);
+
+  // Vollbild: Seitenleiste, Kopfzeile und Navigation ausblenden (+ echtes Vollbild, wo der Browser es erlaubt)
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('ink-fullscreen', fullscreen);
+    return () => root.classList.remove('ink-fullscreen');
+  }, [fullscreen]);
+  useEffect(() => {
+    const onFs = () => {
+      const d = document as Document & { webkitFullscreenElement?: Element | null };
+      if (!(d.fullscreenElement ?? d.webkitFullscreenElement) && nativeFs.current) {
+        nativeFs.current = false;
+        setFullscreen(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', onFs);
+    document.addEventListener('webkitfullscreenchange', onFs);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFs);
+      document.removeEventListener('webkitfullscreenchange', onFs);
+      if (nativeFs.current) exitNativeFullscreen();
+    };
+  }, []);
   const [, setHistoryVersion] = useState(0);
   const [tool, setTool] = useState<Tool>('pen');
   const [penColor, setPenColor] = useState('#1d1d1f');
@@ -226,7 +254,7 @@ export function InkEditor({ note }: { note: Note }) {
       ctx.rect(0, 0, page.width, page.height);
       ctx.clip();
       const visible = { x0: v.x, y0: v.y - top, x1: v.x + w / v.z, y1: v.y - top + h / v.z };
-      drawPageContent(ctx, page, cacheRef.current!.view, visible, 1 / v.z);
+      drawPageContent(ctx, page, cacheRef.current!.view, visible, 1 / v.z, true);
       ctx.restore();
     }
     cacheRef.current!.want(want);
@@ -451,13 +479,52 @@ export function InkEditor({ note }: { note: Note }) {
 
   const isDrawTool = (t: Tool) => t === 'pen' || t === 'highlighter' || t === 'eraser';
 
+  /**
+   * Aufgabenbereich vergrößern/verkleinern. Der Bereich ist unten verankert und wächst nach oben:
+   * neue Zeilen kommen oben hinzu, damit bestehende Zeilen (Handschrift + Haken) an ihrem Platz bleiben.
+   */
+  const resizeTaskArea = (page: InkPage, wanted: number) => {
+    const area = page.tasks;
+    if (!area) return;
+    const cur = taskAreaLayout(page, area).rows.length;
+    const rows = clamp(wanted, 1, maxTaskRows(page));
+    if (rows === cur) {
+      toast(wanted > cur ? 'Mehr Zeilen passen nicht auf die Seite' : 'Mindestens eine Zeile');
+      return;
+    }
+    const checked = Array.from({ length: cur }, (_, i) => !!area.checked[i]);
+    let next: boolean[];
+    if (rows > cur) next = [...Array(rows - cur).fill(false), ...checked];
+    else {
+      const drop = cur - rows;
+      const used = page.strokes.some((st) => {
+        const r = taskRowOfStroke(page, st);
+        return r >= 0 && r < drop;
+      });
+      if (used) {
+        toast('Die oberste Aufgabenzeile ist beschrieben – erst radieren, dann entfernen');
+        return;
+      }
+      next = checked.slice(drop);
+    }
+    const cmd: Command = { t: 'tasks', pageId: page.id, before: area, after: { rows, checked: next } };
+    applyCommand(cmd, false);
+    pushCommand(cmd);
+  };
+
   /** Tippen auf ein Aufgaben-Kästchen: Haken setzen/entfernen. true, wenn getroffen. */
   const toggleTaskAt = (clientX: number, clientY: number) => {
     const w = toWorld(clientX, clientY);
     const idx = pageAt(w.x, w.y);
     if (idx < 0) return false;
     const { page, top } = layoutRef.current[idx];
-    const row = hitTaskBox(page, w.x, w.y - top, 10 / Math.max(0.6, viewRef.current.z));
+    const tol = 10 / Math.max(0.6, viewRef.current.z);
+    const ctrl = hitTaskControl(page, w.x, w.y - top, tol);
+    if (ctrl && page.tasks) {
+      resizeTaskArea(page, page.tasks.rows + (ctrl === 'add' ? 1 : -1));
+      return true;
+    }
+    const row = hitTaskBox(page, w.x, w.y - top, tol);
     if (row < 0 || !page.tasks) return false;
     const before = page.tasks;
     const checked = [...before.checked];
@@ -589,7 +656,8 @@ export function InkEditor({ note }: { note: Note }) {
       if (isTouch) {
         // Handballen-Erkennung: während der Stift schreibt oder kurz danach keine Fingereingaben
         if (penDown.current || Date.now() - lastPenUp.current < 300) return;
-        if ((e.width > 60 || e.height > 60) && (e.width * e.height > 3600)) return;
+        // Nur sehr große Auflageflächen (Handballen) ignorieren – Finger auf dem iPad melden bis ca. 80 px
+        if (e.width * e.height > 12000) return;
         try { el.setPointerCapture(e.pointerId); } catch { /* synthetische Zeiger */ }
         touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
         if (touches.current.size === 2) {
@@ -659,6 +727,7 @@ export function InkEditor({ note }: { note: Note }) {
           clampView();
           setZoomPct(Math.round(v.z * 100));
           requestRender();
+          requestLive();
           return;
         }
       }
@@ -722,6 +791,15 @@ export function InkEditor({ note }: { note: Note }) {
 
     // iOS: Systemgesten (Seitenzoom, Lupe, Textauswahl) auf der Zeichenfläche unterbinden
     const prevent = (e: Event) => e.preventDefault();
+    // Sicherheitsnetz: liegen keine Finger mehr auf, verbliebene Gesten-Zustände zurücksetzen
+    // (Safari liefert gelegentlich kein pointerup für den zweiten Finger)
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length === 0) {
+        touches.current.clear();
+        pinchRef.current = null;
+        if (panRef.current && !penDown.current) panRef.current = null;
+      } else if (e.touches.length < 2) pinchRef.current = null;
+    };
 
     el.addEventListener('pointerdown', onDown);
     el.addEventListener('pointermove', onMove);
@@ -731,6 +809,9 @@ export function InkEditor({ note }: { note: Note }) {
     el.addEventListener('touchstart', prevent, { passive: false });
     el.addEventListener('touchmove', prevent, { passive: false });
     el.addEventListener('gesturestart', prevent);
+    el.addEventListener('gesturechange', prevent);
+    el.addEventListener('touchend', onTouchEnd);
+    el.addEventListener('touchcancel', onTouchEnd);
     el.addEventListener('contextmenu', prevent);
     return () => {
       el.removeEventListener('pointerdown', onDown);
@@ -741,6 +822,9 @@ export function InkEditor({ note }: { note: Note }) {
       el.removeEventListener('touchstart', prevent);
       el.removeEventListener('touchmove', prevent);
       el.removeEventListener('gesturestart', prevent);
+      el.removeEventListener('gesturechange', prevent);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
       el.removeEventListener('contextmenu', prevent);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -846,6 +930,20 @@ export function InkEditor({ note }: { note: Note }) {
 
   const curPage = () => pagesRef.current[Math.min(currentPage, pagesRef.current.length - 1)];
 
+  /** Nicht abgehakte Aufgabenzeilen mit Handschrift (für „offene Aufgaben übernehmen“) */
+  const openTaskRows = (page: InkPage) => {
+    if (!page.tasks) return [];
+    const rows = taskAreaLayout(page, page.tasks).rows;
+    const byRow = new Map<number, Stroke[]>();
+    for (const st of page.strokes) {
+      const r = taskRowOfStroke(page, st);
+      if (r < 0 || page.tasks.checked[r]) continue;
+      if (!byRow.has(r)) byRow.set(r, []);
+      byRow.get(r)!.push(st);
+    }
+    return rows.filter((r) => byRow.has(r.index)).map((r) => ({ rowTop: taskRowTop(r), strokes: byRow.get(r.index)! }));
+  };
+
   const scrollToPage = (idx: number) => {
     const l = layoutRef.current[idx];
     if (!l) return;
@@ -870,7 +968,30 @@ export function InkEditor({ note }: { note: Note }) {
     saveDebounced.flush();
     const cur = curPage();
     const p = newInkPage(note.id, 0, cur && !cur.bgAttachmentId ? cur.background : settings.defaultPageBackground);
-    if (cur?.tasks) p.tasks = { rows: cur.tasks.rows, checked: [] };
+    if (cur?.tasks) {
+      p.tasks = { rows: cur.tasks.rows, checked: [] };
+      const open = openTaskRows(cur);
+      if (open.length) {
+        const ok = await confirmDialog({
+          title: 'Offene Aufgaben übernehmen?',
+          text: `Auf dieser Seite ${open.length === 1 ? 'ist 1 Aufgabe' : `sind ${open.length} Aufgaben`} noch nicht abgehakt. Sollen sie auf die neue Seite übernommen werden?`,
+          confirmLabel: 'Übernehmen',
+          cancelLabel: 'Nicht übernehmen'
+        });
+        if (ok) {
+          p.tasks.rows = clamp(Math.max(p.tasks.rows, open.length), 1, maxTaskRows(p));
+          const newRows = taskAreaLayout(p, p.tasks).rows;
+          open.slice(0, newRows.length).forEach((o, i) => {
+            const dy = taskRowTop(newRows[i]) - o.rowTop;
+            for (const st of o.strokes) {
+              const pts = st.points.slice();
+              for (let k = 1; k < pts.length; k += 3) pts[k] = +(pts[k] + dy).toFixed(2);
+              p.strokes.push({ ...st, id: uid(), points: pts });
+            }
+          });
+        }
+      }
+    }
     const pages = [...pagesRef.current];
     pages.splice(currentPage + 1, 0, p);
     await reindexPages(pages);
@@ -923,10 +1044,7 @@ export function InkEditor({ note }: { note: Note }) {
   };
   const changeTaskRows = (delta: number) => {
     const p = curPage();
-    if (!p.tasks) return;
-    const rows = clamp(p.tasks.rows + delta, 1, maxTaskRows(p));
-    if (rows === p.tasks.rows) return;
-    setTaskArea({ rows, checked: p.tasks.checked.slice(0, rows) });
+    if (p.tasks) resizeTaskArea(p, p.tasks.rows + delta);
   };
 
   const setBackground = (bg: PageBackground, all: boolean) => {
@@ -987,6 +1105,27 @@ export function InkEditor({ note }: { note: Note }) {
       toastError(e, 'PDF konnte nicht importiert werden');
     } finally {
       setPdfProgress(null);
+    }
+  };
+
+  const toggleFullscreen = () => {
+    if (!fullscreen) {
+      setFullscreen(true);
+      // muss direkt in der Tipp-Aktion aufgerufen werden (Safari)
+      const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+      try {
+        const r = el.requestFullscreen ? el.requestFullscreen() : el.webkitRequestFullscreen?.();
+        nativeFs.current = true;
+        if (r && typeof (r as Promise<void>).catch === 'function') (r as Promise<void>).catch(() => (nativeFs.current = false));
+      } catch {
+        nativeFs.current = false;
+      }
+    } else {
+      if (nativeFs.current) {
+        nativeFs.current = false;
+        exitNativeFullscreen();
+      }
+      setFullscreen(false);
     }
   };
 
@@ -1076,6 +1215,7 @@ export function InkEditor({ note }: { note: Note }) {
                 ? [
                     { label: 'Aufgabenzeile hinzufügen', icon: <ListChecks size={17} />, onClick: () => changeTaskRows(1) },
                     { label: 'Aufgabenzeile entfernen', icon: <ListChecks size={17} />, onClick: () => changeTaskRows(-1) },
+                    { label: 'Aufgabenbereich: ganze Seite', icon: <ListChecks size={17} />, onClick: () => changeTaskRows(999) },
                     { label: 'Aufgabenbereich entfernen', icon: <ListChecks size={17} />, onClick: () => setTaskArea(null) }
                   ]
                 : [{ label: 'Aufgabenbereich unten einfügen', icon: <ListChecks size={17} />, onClick: () => setTaskArea({ rows: DEFAULT_TASK_ROWS, checked: [] }) }]),
@@ -1099,6 +1239,14 @@ export function InkEditor({ note }: { note: Note }) {
             aria-pressed={settings.fingerDraws}
           >
             <Fingerprint size={20} />
+          </button>
+          <button
+            className={'icon-btn' + (fullscreen ? ' active' : '')}
+            onClick={toggleFullscreen}
+            title={fullscreen ? 'Vollbild beenden' : 'Vollbild'}
+            aria-label={fullscreen ? 'Vollbild beenden' : 'Vollbild'}
+          >
+            {fullscreen ? <Shrink size={20} /> : <Expand size={20} />}
           </button>
           <button className="icon-btn" onClick={() => zoomBy(1 / 1.25)} title="Verkleinern" aria-label="Verkleinern">
             <ZoomOut size={20} />
@@ -1144,4 +1292,14 @@ export function InkEditor({ note }: { note: Note }) {
 /** Seiten einer Handschrift-Notiz laden (für Export) */
 export async function loadInkPages(noteId: string) {
   return db.inkPages.where('[noteId+index]').between([noteId, Dexie.minKey], [noteId, Dexie.maxKey]).toArray();
+}
+
+function exitNativeFullscreen() {
+  const d = document as Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => void };
+  try {
+    if (d.fullscreenElement) void d.exitFullscreen?.().catch(() => {});
+    else if (d.webkitFullscreenElement) d.webkitExitFullscreen?.();
+  } catch {
+    /* ignorieren */
+  }
 }
