@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useState, type ReactNode } from 'react';
 import { HashRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { GlobalUI, toast } from './components/ui';
@@ -6,16 +6,23 @@ import { FileSaveUI } from './components/FileSave';
 import { LockGate } from './components/Lock';
 import { useApplyTheme, useSettings } from './lib/hooks';
 import { flushAll } from './lib/saver';
+import { lazyWithRetry } from './lib/lazyRetry';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
 import NotesPage from './pages/NotesPage';
 
 // Selten genutzte bzw. große Bereiche erst bei Bedarf laden (alle Dateien sind offline vorgehalten)
-const NoteEditorPage = lazy(() => import('./pages/NoteEditorPage'));
-const TasksPage = lazy(() => import('./pages/TasksPage'));
-const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
-const ProjectDetail = lazy(() => import('./pages/ProjectsPage').then((m) => ({ default: m.ProjectDetail })));
-const SearchPage = lazy(() => import('./pages/SearchPage'));
-const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const NoteEditorPage = lazyWithRetry(() => import('./pages/NoteEditorPage'));
+const TasksPage = lazyWithRetry(() => import('./pages/TasksPage'));
+const ProjectsPage = lazyWithRetry(() => import('./pages/ProjectsPage'));
+const ProjectDetail = lazyWithRetry(() => import('./pages/ProjectsPage').then((m) => ({ default: m.ProjectDetail })));
+const SearchPage = lazyWithRetry(() => import('./pages/SearchPage'));
+const SettingsPage = lazyWithRetry(() => import('./pages/SettingsPage'));
+
+function RouteBoundary({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  return <ErrorBoundary resetKey={location.pathname}>{children}</ErrorBoundary>;
+}
 
 function FlushOnNavigate() {
   const location = useLocation();
@@ -53,11 +60,11 @@ function UpdatePrompt() {
 function usePrefetch() {
   useEffect(() => {
     const t = setTimeout(() => {
-      void import('./pages/NoteEditorPage');
-      void import('./pages/TasksPage');
-      void import('./pages/SearchPage');
-      void import('./pages/ProjectsPage');
-      void import('./pages/SettingsPage');
+      void import('./pages/NoteEditorPage').catch(() => {});
+      void import('./pages/TasksPage').catch(() => {});
+      void import('./pages/SearchPage').catch(() => {});
+      void import('./pages/ProjectsPage').catch(() => {});
+      void import('./pages/SettingsPage').catch(() => {});
     }, 250);
     return () => clearTimeout(t);
   }, []);
@@ -72,7 +79,8 @@ export default function App() {
       <FlushOnNavigate />
       <LockGate>
         <Layout>
-          <Suspense fallback={<div className="page" />}>
+          <RouteBoundary>
+          <Suspense fallback={<div className="page"><div className="empty">Wird geladen …</div></div>}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/notes" element={<NotesPage key="all" variant="all" />} />
@@ -89,6 +97,7 @@ export default function App() {
               <Route path="*" element={<Dashboard />} />
             </Routes>
           </Suspense>
+          </RouteBoundary>
         </Layout>
       </LockGate>
       <GlobalUI />

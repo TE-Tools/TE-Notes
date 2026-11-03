@@ -5,30 +5,28 @@ import { registerSW } from 'virtual:pwa-register';
 import App from './App';
 import { db } from './db/db';
 import { ensureSeeded } from './db/repo';
-import { flushAll, installLifecycleFlush } from './lib/saver';
+import { installLifecycleFlush } from './lib/saver';
+import { clearReloadFlag } from './lib/lazyRetry';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import './styles.css';
 
 installLifecycleFlush();
 
-// Nach einem Update können alte Programmteile fehlen: Änderungen sichern und einmalig neu laden
-window.addEventListener('vite:preloadError', (e) => {
-  e.preventDefault();
-  flushAll();
-  try {
-    if (sessionStorage.getItem('te-reloaded') === '1') return;
-    sessionStorage.setItem('te-reloaded', '1');
-  } catch {
-    /* ignorieren */
+// Nach einem Update können alte Programmteile fehlen. Das Neuladen übernimmt lazyWithRetry;
+// hier KEIN preventDefault(), sonst liefert Vite ein leeres Modul und die Seite bleibt weiß.
+clearReloadFlag();
+
+// Falls trotzdem ein Fehler die Oberfläche komplett leert: Hinweis statt weißer Seite
+function showIfBlank(err: unknown) {
+  const root = document.getElementById('root');
+  if (root && root.childElementCount === 0 && started) {
+    const e = err as Error;
+    fatal('Unerwarteter Fehler: ' + (e?.message ?? String(err)) + ' – Bitte die Seite neu laden.');
   }
-  setTimeout(() => location.reload(), 400);
-});
-window.addEventListener('load', () => setTimeout(() => {
-  try {
-    sessionStorage.removeItem('te-reloaded');
-  } catch {
-    /* ignorieren */
-  }
-}, 5000));
+}
+let started = false;
+window.addEventListener('error', (e) => setTimeout(() => showIfBlank(e.error ?? e.message), 0));
+window.addEventListener('unhandledrejection', (e) => setTimeout(() => showIfBlank(e.reason), 0));
 
 function fatal(msg: string) {
   const root = document.getElementById('root')!;
@@ -39,7 +37,11 @@ function fatal(msg: string) {
   h.textContent = 'TE Notes kann nicht gestartet werden';
   const p = document.createElement('p');
   p.textContent = msg;
-  box.append(h, p);
+  const btn = document.createElement('button');
+  btn.textContent = 'Neu laden';
+  btn.style.cssText = 'margin-top:12px;padding:10px 18px;font-size:16px;border-radius:8px;border:1px solid #999;background:#fff';
+  btn.onclick = () => location.reload();
+  box.append(h, p, btn);
   root.append(box);
 }
 
@@ -67,9 +69,12 @@ async function start() {
     location.reload();
   });
 
+  started = true;
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <App />
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </StrictMode>
   );
 
