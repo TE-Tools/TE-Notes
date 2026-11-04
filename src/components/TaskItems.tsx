@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { AlertCircle, Check, Flag, Link2, User } from 'lucide-react';
@@ -80,9 +80,11 @@ export function TaskModal({
   const set = <K extends keyof Task>(k: K, v: Task[K]) => setF((x) => ({ ...x, [k]: v }));
   const note = useLiveQuery(() => (f.noteId ? db.notes.get(f.noteId) : undefined), [f.noteId]);
 
+  const saving = useRef(false);
   const save = async () => {
     const title = (f.title ?? '').trim();
-    if (!title) return;
+    if (!title || saving.current) return;
+    saving.current = true;
     try {
       if (task) await updateTask(task.id, { ...f, title });
       else {
@@ -91,6 +93,7 @@ export function TaskModal({
       }
       onClose();
     } catch (e) {
+      saving.current = false;
       toastError(e, 'Speichern fehlgeschlagen');
     }
   };

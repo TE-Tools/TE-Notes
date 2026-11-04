@@ -67,8 +67,11 @@ export function LockGate({ children }: { children: ReactNode }) {
     };
     const onVis = () => {
       const s = settingsRef.current;
-      if (document.visibilityState === 'hidden') hiddenAt.current = Date.now();
-      else if (s.lockEnabled && hiddenAt.current && Date.now() - hiddenAt.current >= s.lockTimeoutMin * 60_000) setLocked(true);
+      if (document.visibilityState === 'hidden') {
+        hiddenAt.current = Date.now();
+        // „Sofort sperren“: schon beim Verlassen sperren, damit die App-Übersicht keine Inhalte zeigt
+        if (s.lockEnabled && s.lockTimeoutMin === 0) setLocked(true);
+      } else if (s.lockEnabled && hiddenAt.current && Date.now() - hiddenAt.current >= s.lockTimeoutMin * 60_000) setLocked(true);
     };
     document.addEventListener('visibilitychange', onVis);
     return () => {
@@ -77,11 +80,16 @@ export function LockGate({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Beim Sperren Fokus aus Eingabefeldern nehmen: Tastatureingaben (PIN) dürfen nicht in Notizen/Dialoge gelangen
+  useEffect(() => {
+    if (locked) (document.activeElement as HTMLElement | null)?.blur?.();
+  }, [locked]);
+
   if (!ready) return null;
   return (
     <>
       {/* Beim Start gesperrt: Inhalte gar nicht erst laden */}
-      {(!locked || hiddenAt.current > 0) && <div className="lock-gate" style={locked ? { visibility: 'hidden' } : undefined}>{children}</div>}
+      {(!locked || hiddenAt.current > 0) && <div className="lock-gate" style={locked ? { visibility: 'hidden' } : undefined} {...(locked ? { inert: '' } : {})}>{children}</div>}
       {locked && settings.lockEnabled && <LockScreen onUnlock={() => setLocked(false)} />}
     </>
   );
@@ -117,12 +125,15 @@ function LockScreen({ onUnlock }: { onUnlock: () => void }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Tasten gehören ausschließlich der PIN-Eingabe (nicht an Dialoge/Editor dahinter weiterreichen)
+      e.preventDefault();
+      e.stopImmediatePropagation();
       if (/^\d$/.test(e.key)) press(e.key);
       else if (e.key === 'Backspace') setPin((p) => p.slice(0, -1));
       else if (e.key === 'Enter') submit(pin);
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   });
 
   return (

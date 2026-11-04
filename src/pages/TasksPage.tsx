@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { CheckCircle2, Plus } from 'lucide-react';
 import { db } from '../db/db';
@@ -20,8 +20,26 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'all', label: 'Alle' }
 ];
 
+/** Kalendertage addieren (nicht 24-h-Schritte – sonst falsch an Tagen der Zeitumstellung) */
 function addDays(n: number) {
-  return todayISO(new Date(Date.now() + n * 86400000));
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return todayISO(d);
+}
+
+/** Aktuelles Datum, das sich nach Mitternacht bzw. beim Zurückkehren in die App aktualisiert */
+function useToday() {
+  const [today, setToday] = useState(todayISO);
+  useEffect(() => {
+    const refresh = () => setToday(todayISO());
+    const t = setInterval(refresh, 60_000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, []);
+  return today;
 }
 
 export default function TasksPage() {
@@ -35,7 +53,7 @@ export default function TasksPage() {
   const [modal, setModal] = useState<Task | 'new' | null>(null);
 
   const all = useLiveQuery(() => db.tasks.where('deletedAt').equals(0).toArray(), []);
-  const today = todayISO();
+  const today = useToday();
 
   const counts = useMemo(() => {
     const c = { open: 0, overdue: 0, deferred: 0, done: 0, all: 0 };
@@ -90,11 +108,15 @@ export default function TasksPage() {
   const addQuick = async () => {
     const title = quick.trim();
     if (!title) return;
+    // Feld sofort leeren: doppeltes Enter legt die Aufgabe nicht zweimal an
+    const due = quickDue;
+    setQuick('');
+    setQuickDue('');
     try {
-      await createTask({ title, dueDate: quickDue || null, projectId: projectId || null });
-      setQuick('');
-      setQuickDue('');
+      await createTask({ title, dueDate: due || null, projectId: projectId || null });
     } catch (e) {
+      setQuick(title);
+      setQuickDue(due);
       toastError(e);
     }
   };

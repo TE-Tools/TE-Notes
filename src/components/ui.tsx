@@ -319,8 +319,8 @@ export function TagInput({
 }: { value: string[]; onChange: (v: string[]) => void; placeholder?: string; suggestions?: string[] }) {
   const [text, setText] = useState('');
   const listId = useRef('tags-' + Math.random().toString(36).slice(2)).current;
-  const commit = () => {
-    const parts = text.split(',').map((s) => s.trim()).filter(Boolean);
+  const commit = (raw: string = text) => {
+    const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
     if (parts.length) {
       const next = [...value];
       for (const p of parts) if (!next.includes(p)) next.push(p);
@@ -344,8 +344,7 @@ export function TagInput({
         placeholder={value.length ? '' : placeholder}
         onChange={(e) => {
           if (e.target.value.endsWith(',')) {
-            setText(e.target.value);
-            setTimeout(commit);
+            commit(e.target.value);
           } else setText(e.target.value);
         }}
         onKeyDown={(e) => {
@@ -356,7 +355,7 @@ export function TagInput({
             onChange(value.slice(0, -1));
           }
         }}
-        onBlur={commit}
+        onBlur={() => commit()}
       />
       {suggestions.length > 0 && (
         <datalist id={listId}>
