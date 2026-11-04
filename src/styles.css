@@ -636,6 +636,21 @@ a { color: var(--accent); }
 .ink-fullscreen .sidebar, .ink-fullscreen .scrim, .ink-fullscreen .bottom-nav, .ink-fullscreen .editor-top, .ink-fullscreen .update-bar { display: none !important; }
 .ink-fullscreen .editor-page .ink-stage { margin-bottom: 0 !important; }
 .ink-fullscreen .ink-toolbar { padding-top: calc(4px + var(--safe-top)); }
+/* Vollbild Handschrift: nur Seite + schwebende Kurzleiste */
+.ink-fullscreen .ink-stage { padding-top: 0; }
+.ink-float {
+  position: absolute; z-index: 5; left: 50%; transform: translateX(-50%); top: calc(10px + var(--safe-top));
+  display: flex; align-items: center; gap: 2px; padding: 4px 6px; border-radius: 16px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--border); box-shadow: var(--shadow-lg);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); max-width: calc(100% - 20px); overflow-x: auto;
+}
+.ink-float .icon-btn { width: 44px; height: 44px; flex-shrink: 0; }
+.ink-float-sep { width: 1px; align-self: stretch; margin: 6px 4px; background: var(--border); flex-shrink: 0; }
+/* Vollbild Text-Notiz: Navigation ausblenden, breiterer Schreibbereich */
+.write-fullscreen .sidebar, .write-fullscreen .scrim, .write-fullscreen .bottom-nav, .write-fullscreen .update-bar,
+.write-fullscreen .editor-inner .meta-bar { display: none !important; }
+.write-fullscreen .editor-inner { max-width: 1000px; padding-bottom: calc(60px + var(--safe-bottom)); }
+.write-fullscreen .editor-top .icon-btn[aria-label='Seitenleiste ein-/ausblenden'] { display: none; }
 .ink-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-3); }
 @media (max-width: 767px) {
   .ink-group { padding: 0 3px; }

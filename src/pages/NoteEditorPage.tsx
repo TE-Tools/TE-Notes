@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import type { JSONContent } from '@tiptap/react';
 import {
   Archive, ArchiveRestore, Check, ChevronLeft, Copy, FileDown, FileText, Image as ImageIcon, Loader2, MoreHorizontal, Paperclip,
-  Pin, PinOff, Printer, RotateCcw, SlidersHorizontal, Trash2, X, Package
+  Pin, PinOff, Printer, Expand, Shrink, RotateCcw, SlidersHorizontal, Trash2, X, Package
 } from 'lucide-react';
 import { db } from '../db/db';
 import {
@@ -23,6 +23,7 @@ import { TaskModal, TaskRow } from '../components/TaskItems';
 import { pickFiles, saveFile } from '../components/FileSave';
 import { SidebarToggle } from '../components/Layout';
 import { backupFileName, exportNotes } from '../lib/backup';
+import { useWriteFullscreen } from '../lib/fullscreen';
 
 export default function NoteEditorPage() {
   const { id = '' } = useParams();
@@ -90,6 +91,7 @@ function Editor({ note, initialDoc }: { note: Note; initialDoc: JSONContent | nu
   const [taskModal, setTaskModal] = useState<Task | Partial<Task> | null>(null);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const readOnly = note.deletedAt > 0;
+  const { fullscreen: textFs, toggleFullscreen: toggleTextFs } = useWriteFullscreen('write-fullscreen');
 
   // Titel automatisch speichern
   const saveTitle = useMemo(
@@ -254,6 +256,16 @@ function Editor({ note, initialDoc }: { note: Note; initialDoc: JSONContent | nu
       )}
       <span className="spacer" />
       <SaveIndicator />
+      {note.type !== 'ink' && (
+        <button
+          className={'icon-btn' + (textFs ? ' active' : '')}
+          onClick={toggleTextFs}
+          title={textFs ? 'Vollbild beenden (Esc)' : 'Vollbild – nur Schreibbereich'}
+          aria-label={textFs ? 'Vollbild beenden' : 'Vollbild'}
+        >
+          {textFs ? <Shrink size={19} /> : <Expand size={19} />}
+        </button>
+      )}
       {!readOnly && (
         <button className={'icon-btn' + (note.pinned ? ' active' : '')} onClick={() => setPinned(note.id, !note.pinned)} title={note.pinned ? 'Angeheftet' : 'Anheften'} aria-label="Anheften">
           <Pin size={19} fill={note.pinned ? 'currentColor' : 'none'} />

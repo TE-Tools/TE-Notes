@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import Dexie from 'dexie';
 import {
   Eraser, FilePlus2, FileUp, Hand, Highlighter, ImagePlus, Maximize2, MousePointer2, PenTool, Redo2, Trash2, Undo2,
-  ZoomIn, ZoomOut, LayoutTemplate, Fingerprint, ListChecks, Expand, Shrink
+  ZoomIn, ZoomOut, LayoutTemplate, Fingerprint, ListChecks, Expand, Shrink, PanelTopOpen, PanelTopClose
 } from 'lucide-react';
 import { db } from '../db/db';
 import { addAttachment, newInkPage, setSetting, updateNote } from '../db/repo';
@@ -20,6 +20,7 @@ import { downscaleImage, imageSize, loadBitmap } from '../lib/images';
 import { clamp, debounce, uid } from '../lib/util';
 import { markDirty, registerFlusher, track } from '../lib/saver';
 import { useSettings } from '../lib/hooks';
+import { useWriteFullscreen } from '../lib/fullscreen';
 
 type Tool = InkTool | 'eraser' | 'select' | 'hand';
 
@@ -67,31 +68,12 @@ export function InkEditor({ note }: { note: Note }) {
   const [pageCount, setPageCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
   const [zoomPct, setZoomPct] = useState(100);
-  const [fullscreen, setFullscreen] = useState(false);
-  const nativeFs = useRef(false);
-
-  // Vollbild: Seitenleiste, Kopfzeile und Navigation ausblenden (+ echtes Vollbild, wo der Browser es erlaubt)
+  const { fullscreen, toggleFullscreen, exitFullscreen } = useWriteFullscreen('ink-fullscreen');
+  // Im Vollbild ist die große Werkzeugleiste eingeklappt (nur schwebende Kurzleiste)
+  const [barOpen, setBarOpen] = useState(false);
   useEffect(() => {
-    const root = document.documentElement;
-    root.classList.toggle('ink-fullscreen', fullscreen);
-    return () => root.classList.remove('ink-fullscreen');
+    if (!fullscreen) setBarOpen(false);
   }, [fullscreen]);
-  useEffect(() => {
-    const onFs = () => {
-      const d = document as Document & { webkitFullscreenElement?: Element | null };
-      if (!(d.fullscreenElement ?? d.webkitFullscreenElement) && nativeFs.current) {
-        nativeFs.current = false;
-        setFullscreen(false);
-      }
-    };
-    document.addEventListener('fullscreenchange', onFs);
-    document.addEventListener('webkitfullscreenchange', onFs);
-    return () => {
-      document.removeEventListener('fullscreenchange', onFs);
-      document.removeEventListener('webkitfullscreenchange', onFs);
-      if (nativeFs.current) exitNativeFullscreen();
-    };
-  }, []);
   const [, setHistoryVersion] = useState(0);
   const [tool, setTool] = useState<Tool>('pen');
   const [penColor, setPenColor] = useState('#1d1d1f');
@@ -1110,27 +1092,6 @@ export function InkEditor({ note }: { note: Note }) {
     }
   };
 
-  const toggleFullscreen = () => {
-    if (!fullscreen) {
-      setFullscreen(true);
-      // muss direkt in der Tipp-Aktion aufgerufen werden (Safari)
-      const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
-      try {
-        const r = el.requestFullscreen ? el.requestFullscreen() : el.webkitRequestFullscreen?.();
-        nativeFs.current = true;
-        if (r && typeof (r as Promise<void>).catch === 'function') (r as Promise<void>).catch(() => (nativeFs.current = false));
-      } catch {
-        nativeFs.current = false;
-      }
-    } else {
-      if (nativeFs.current) {
-        nativeFs.current = false;
-        exitNativeFullscreen();
-      }
-      setFullscreen(false);
-    }
-  };
-
   const zoomBy = (f: number) => zoomAround(sizeRef.current.w / 2, sizeRef.current.h / 2, viewRef.current.z * f);
   /* ---------------------------------------------------------------- */
 
@@ -1153,6 +1114,7 @@ export function InkEditor({ note }: { note: Note }) {
 
   return (
     <div className="ink-wrap">
+      {!(fullscreen && !barOpen) && (
       <div className="ink-toolbar no-print" role="toolbar" aria-label="Werkzeuge">
         <div className="ink-group">
           {toolBtn('pen', <PenTool size={20} />, 'Stift (P)')}
@@ -1250,6 +1212,11 @@ export function InkEditor({ note }: { note: Note }) {
           >
             {fullscreen ? <Shrink size={20} /> : <Expand size={20} />}
           </button>
+          {fullscreen && (
+            <button className="icon-btn" onClick={() => setBarOpen(false)} title="Werkzeugleiste einklappen" aria-label="Werkzeugleiste einklappen">
+              <PanelTopClose size={20} />
+            </button>
+          )}
           <button className="icon-btn" onClick={() => zoomBy(1 / 1.25)} title="Verkleinern" aria-label="Verkleinern">
             <ZoomOut size={20} />
           </button>
@@ -1264,12 +1231,38 @@ export function InkEditor({ note }: { note: Note }) {
           </button>
         </div>
       </div>
+      )}
       <div className="ink-stage" ref={stageRef}>
         <canvas ref={baseRef} className="ink-canvas" />
         <canvas ref={liveRef} className={'ink-canvas ink-live tool-' + tool} />
         <div ref={overlayRef} className="ink-selection" style={{ display: 'none' }} onPointerDown={(e) => dragImg(e, 'move')}>
           <div className="ink-handle" onPointerDown={(e) => dragImg(e, 'resize')} />
         </div>
+        {fullscreen && !barOpen && (
+          <div className="ink-float no-print" role="toolbar" aria-label="Werkzeuge (Vollbild)">
+            {toolBtn('pen', <PenTool size={20} />, 'Stift (P)')}
+            {toolBtn('highlighter', <Highlighter size={20} />, 'Textmarker (H)')}
+            {toolBtn('eraser', <Eraser size={20} />, 'Radiergummi (E)')}
+            {toolBtn('hand', <Hand size={20} />, 'Verschieben')}
+            <span className="ink-float-sep" />
+            <button className="icon-btn" onClick={undo} disabled={!undoRef.current.length} title="Rückgängig" aria-label="Rückgängig">
+              <Undo2 size={20} />
+            </button>
+            <button className="icon-btn" onClick={redo} disabled={!redoRef.current.length} title="Wiederholen" aria-label="Wiederholen">
+              <Redo2 size={20} />
+            </button>
+            <button className="icon-btn" onClick={addPage} title="Seite hinzufügen" aria-label="Seite hinzufügen">
+              <FilePlus2 size={20} />
+            </button>
+            <span className="ink-float-sep" />
+            <button className="icon-btn" onClick={() => setBarOpen(true)} title="Alle Werkzeuge (Farben, Stärken …)" aria-label="Alle Werkzeuge einblenden">
+              <PanelTopOpen size={20} />
+            </button>
+            <button className="icon-btn active" onClick={exitFullscreen} title="Vollbild beenden (Esc)" aria-label="Vollbild beenden">
+              <Shrink size={20} />
+            </button>
+          </div>
+        )}
         {pageCount > 0 && (
           <div className="ink-pageinfo">
             Seite {Math.min(currentPage + 1, pageCount)} / {pageCount}
@@ -1296,12 +1289,3 @@ export async function loadInkPages(noteId: string) {
   return db.inkPages.where('[noteId+index]').between([noteId, Dexie.minKey], [noteId, Dexie.maxKey]).toArray();
 }
 
-function exitNativeFullscreen() {
-  const d = document as Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => void };
-  try {
-    if (d.fullscreenElement) void d.exitFullscreen?.().catch(() => {});
-    else if (d.webkitFullscreenElement) d.webkitExitFullscreen?.();
-  } catch {
-    /* ignorieren */
-  }
-}
