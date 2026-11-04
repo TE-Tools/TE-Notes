@@ -78,7 +78,7 @@ export function InkEditor({ note }: { note: Note }) {
   const [tool, setTool] = useState<Tool>('pen');
   const [penColor, setPenColor] = useState('#1d1d1f');
   const [hlColor, setHlColor] = useState(HL_COLORS[0]);
-  const [penSize, setPenSize] = useState(1);
+  const [penSize, setPenSize] = useState(0) // Standard: dünnste Stiftstärke;
   const [hlSize, setHlSize] = useState(1);
   const [eraserSize, setEraserSize] = useState(1);
   const [selected, setSelected] = useState<{ pageId: string; imageId: string } | null>(null);
