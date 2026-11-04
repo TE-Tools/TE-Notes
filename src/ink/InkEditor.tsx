@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import Dexie from 'dexie';
 import {
   Eraser, FilePlus2, FileUp, Hand, Highlighter, ImagePlus, Maximize2, MousePointer2, PenTool, Redo2, Trash2, Undo2,
-  ZoomIn, ZoomOut, LayoutTemplate, Fingerprint, ListChecks, Expand, Shrink, PanelTopOpen, PanelTopClose
+  ZoomIn, ZoomOut, LayoutTemplate, Fingerprint, ListChecks, Expand, Shrink, PanelTopOpen, PanelTopClose, X
 } from 'lucide-react';
 import { db } from '../db/db';
 import { addAttachment, newInkPage, setSetting, updateNote } from '../db/repo';
@@ -1258,10 +1258,12 @@ export function InkEditor({ note }: { note: Note }) {
             <button className="icon-btn" onClick={() => setBarOpen(true)} title="Alle Werkzeuge (Farben, Stärken …)" aria-label="Alle Werkzeuge einblenden">
               <PanelTopOpen size={20} />
             </button>
-            <button className="icon-btn active" onClick={exitFullscreen} title="Vollbild beenden (Esc)" aria-label="Vollbild beenden">
-              <Shrink size={20} />
-            </button>
           </div>
+        )}
+        {fullscreen && (
+          <button className="ink-fs-close no-print" onClick={exitFullscreen} title="Vollbild beenden (Esc)" aria-label="Vollbild beenden">
+            <X size={22} />
+          </button>
         )}
         {pageCount > 0 && (
           <div className="ink-pageinfo">

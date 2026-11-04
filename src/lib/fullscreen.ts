@@ -13,6 +13,19 @@ function exitNative() {
 }
 
 /**
+ * Echtes Browser-Vollbild nur dort, wo es nicht stört: Auf iPad/iPhone blendet das System dabei oben links
+ * einen eigenen Schließen-Knopf ein, der Stift und Werkzeuge überdeckt. Die installierte App läuft dort
+ * ohnehin randlos – das Ausblenden der Oberfläche genügt.
+ */
+function nativeAllowed() {
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const standalone =
+    (navigator as Navigator & { standalone?: boolean }).standalone === true ||
+    window.matchMedia?.('(display-mode: standalone)').matches;
+  return !ios && !standalone;
+}
+
+/**
  * Vollbild für den Schreibbereich: setzt `className` auf <html> (blendet per CSS Seitenleiste,
  * Navigation usw. aus) und nutzt – wo der Browser es erlaubt – zusätzlich echtes Vollbild.
  * In der installierten iPad-App genügt das Ausblenden; Escape beendet das Vollbild.
@@ -65,6 +78,7 @@ export function useWriteFullscreen(className: string) {
   const toggle = useCallback(() => {
     if (on) return exit();
     setOn(true);
+    if (!nativeAllowed()) return;
     // muss direkt in der Tipp-Aktion aufgerufen werden (Safari)
     const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
     try {

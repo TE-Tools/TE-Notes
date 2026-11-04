@@ -642,9 +642,17 @@ a { color: var(--accent); }
   position: absolute; z-index: 5; left: 50%; transform: translateX(-50%); top: calc(10px + var(--safe-top));
   display: flex; align-items: center; gap: 2px; padding: 4px 6px; border-radius: 16px;
   background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--border); box-shadow: var(--shadow-lg);
-  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); max-width: calc(100% - 20px); overflow-x: auto;
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); max-width: calc(100% - 140px); overflow-x: auto;
 }
 .ink-float .icon-btn { width: 44px; height: 44px; flex-shrink: 0; }
+.ink-fs-close {
+  position: absolute; z-index: 6; right: calc(12px + env(safe-area-inset-right, 0px)); top: calc(10px + var(--safe-top));
+  width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--surface) 92%, transparent); color: var(--text); border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); cursor: pointer;
+}
+/* Mit eingeblendeter Werkzeugleiste sitzt der Knopf unter der Leiste rechts */
+.ink-fullscreen .ink-toolbar ~ .ink-stage .ink-fs-close { top: 10px; }
 .ink-float-sep { width: 1px; align-self: stretch; margin: 6px 4px; background: var(--border); flex-shrink: 0; }
 /* Vollbild Text-Notiz: Navigation ausblenden, breiterer Schreibbereich */
 .write-fullscreen .sidebar, .write-fullscreen .scrim, .write-fullscreen .bottom-nav, .write-fullscreen .update-bar,
