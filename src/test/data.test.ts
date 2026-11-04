@@ -8,7 +8,7 @@ import {
   recentNotes, restoreNote, saveCategory, saveNoteBody, saveProject, trashNote, updateNote, updateTask
 } from '../db/repo';
 import { search } from '../lib/search';
-import { analyzeImport, applyImport, exportFullBackup, exportNotes, parseBackup } from '../lib/backup';
+import { analyzeImport, applyImport, exportFullBackup, exportNotes, migrateBackup, parseBackup } from '../lib/backup';
 
 let n = 0;
 beforeEach(async () => {
@@ -86,7 +86,7 @@ describe('Sicherung', () => {
   it('vollständige Sicherung und Wiederherstellung in leere Datenbank', async () => {
     await ensureSeeded();
     const p = await saveProject({ name: 'SAP Migration' });
-    const id = await createNote('meeting', { title: 'Kickoff', projectId: p });
+    const id = await createNote('text', { title: 'Kickoff', projectId: p });
     await saveNoteBody(id, doc('Protokoll'), 'Protokoll');
     const bytes = new Uint8Array([1, 2, 3, 250, 0, 9]);
     const attId = await addAttachment(id, new Blob([bytes], { type: 'application/octet-stream' }), 'daten.bin');
@@ -153,7 +153,7 @@ describe('Sicherung', () => {
 });
 
 describe('Migration', () => {
-  it('migriert eine Datenbank von Schema 1 auf Schema 2', async () => {
+  it('migriert eine Datenbank von Schema 1 auf Schema 3 (Besprechungen → Textnotizen)', async () => {
     const name = 'migrate-' + n;
     const old = new Dexie(name);
     old.version(1).stores({
@@ -165,17 +165,55 @@ describe('Migration', () => {
     await old.table('notes').add({
       id: 'm1', type: 'meeting', title: 'Alt', excerpt: '', tags: [], pinned: 0, archived: 0, archivedAt: 0, deletedAt: 0,
       createdAt: 1, updatedAt: 1, categoryId: null, projectId: null, folderId: null,
-      meeting: { date: '2024-05-01T10:00', participants: ['A'], topic: 'T' }
+      meeting: { date: '2024-05-01T10:00', participants: ['Anna', 'Bert'], topic: 'Budget', decisions: ['Freigabe erteilt'], followUpDate: '2024-06-01' }
+    });
+    await old.table('bodies').add({
+      id: 'm1', doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Gesprächsverlauf' }] }] },
+      text: 'Gesprächsverlauf', updatedAt: 1
+    });
+    await old.table('notes').add({
+      id: 't1', type: 'text', title: 'Normal', excerpt: '', tags: [], pinned: 0, archived: 0, archivedAt: 0, deletedAt: 0,
+      createdAt: 1, updatedAt: 1, categoryId: null, projectId: null, folderId: null
     });
     old.close();
 
     const migrated = new TeNotesDB(name);
     await migrated.open();
-    expect(migrated.verno).toBe(2);
+    expect(migrated.verno).toBe(3);
     const m = await migrated.notes.get('m1');
-    expect(m?.meeting?.location).toBe('');
-    expect(m?.meeting?.decisions).toEqual([]);
-    expect(await migrated.notes.where('meeting.date').above('2024').count()).toBe(1);
+    expect(m?.type).toBe('text');
+    expect(m?.title).toBe('Alt');
+    expect(m?.updatedAt).toBe(1);
+    expect('meeting' in (m ?? {})).toBe(false);
+    const body = await migrated.bodies.get('m1');
+    for (const t of ['Anna, Bert', 'Budget', 'Gesprächsverlauf', 'Freigabe erteilt', 'Entscheidungen']) expect(body?.text).toContain(t);
+    expect(JSON.stringify(body?.doc)).toContain('Gesprächsverlauf');
+    const task = await migrated.tasks.get('wv-m1');
+    expect(task?.dueDate).toBe('2024-06-01');
+    expect(task?.noteId).toBe('m1');
+    expect((await migrated.notes.get('t1'))?.type).toBe('text');
+    expect((await migrated.settings.get('reindexPending'))?.value).toBe(true);
+    migrated.close();
+  });
+
+  it('wandelt Besprechungen aus alten Sicherungen beim Import um', async () => {
+    const parsed = migrateBackup({
+      manifest: { formatVersion: 1 } as never,
+      data: {
+        notes: [{
+          id: 'b1', type: 'meeting', title: 'Jour fixe', excerpt: '', tags: [], pinned: 0, archived: 0, archivedAt: 0, deletedAt: 0,
+          createdAt: 5, updatedAt: 5, categoryId: null, projectId: null, folderId: null,
+          meeting: { date: '2025-01-02T09:00', participants: ['Clara'], topic: '', location: 'Raum 3', decisions: [], followUpDate: null }
+        } as never],
+        bodies: [], inkPages: [], attachments: [], tasks: [], projects: [], categories: [], folders: [], settings: []
+      }
+    });
+    expect(parsed.data.notes[0].type).toBe('text');
+    expect(parsed.data.bodies[0].text).toContain('Clara');
+    expect(parsed.data.bodies[0].text).toContain('Raum 3');
+    expect(parsed.data.tasks).toHaveLength(0);
+    await applyImport(parsed, 'merge-newer');
+    expect((await search('clara')).notes.map((x) => x.id)).toEqual(['b1']);
   });
 });
 

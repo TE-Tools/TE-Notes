@@ -1,17 +1,6 @@
 import type { JSONContent } from '@tiptap/react';
 
-export type NoteType = 'text' | 'ink' | 'meeting';
-
-export interface MeetingInfo {
-  /** Lokales Datum + Uhrzeit, Format YYYY-MM-DDTHH:mm */
-  date: string;
-  participants: string[];
-  topic: string;
-  location: string;
-  decisions: string[];
-  /** Wiedervorlage, Format YYYY-MM-DD */
-  followUpDate: string | null;
-}
+export type NoteType = 'text' | 'ink';
 
 export interface Note {
   id: string;
@@ -30,7 +19,6 @@ export interface Note {
   deletedAt: number;
   createdAt: number;
   updatedAt: number;
-  meeting?: MeetingInfo;
   inkPageCount?: number;
 }
 
@@ -84,6 +72,8 @@ export interface InkTaskArea {
   rows: number;
   /** Abgehakte Zeilen (Index = Zeile) */
   checked: boolean[];
+  /** In eine neue Seite/Notiz übernommene Zeilen (Pfeil statt Haken, zählen nicht mehr als offen) */
+  carried?: boolean[];
 }
 
 export type AttachmentKind = 'file' | 'inkbg' | 'inkimg';
@@ -171,8 +161,7 @@ export const PRIORITY_LABEL: Record<TaskPriority, string> = { 1: 'Hoch', 2: 'Mit
 
 export const NOTE_TYPE_LABEL: Record<NoteType, string> = {
   text: 'Notiz',
-  ink: 'Handschrift',
-  meeting: 'Besprechung'
+  ink: 'Handschrift'
 };
 
 export const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {

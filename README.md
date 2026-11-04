@@ -10,14 +10,14 @@ Eine Marke von **TE Digital**. Persönliches digitales Notizbuch als installierb
 
 | Bereich | Inhalt |
 | --- | --- |
-| Dashboard | Begrüßung, Datum, Schnellanlage (Notiz, Handschrift, Besprechung), zuletzt bearbeitet, angeheftet, offene und überfällige Aufgaben, Wiedervorlagen, kürzlich archiviert, Sicherungs-Erinnerung |
+| Dashboard | Begrüßung, Datum, Schnellanlage (Notiz, Handschrift), zuletzt bearbeitet, angeheftet, offene und überfällige Aufgaben, kürzlich archiviert, Sicherungs-Erinnerung |
 | Notizen | Titel, Inhalt, Erstell-/Änderungsdatum, Kategorie, Tags, Ordner, Projekt, Anheften, Archivieren, Papierkorb. Editor mit Überschriften, Formatierungen, Aufzählungen, nummerierten Listen, Checklisten, Links, Tabellen, Bildern, Dateianhängen. Automatisches Speichern ohne Speichern-Button |
 | Handschrift | Eigener Canvas-Editor: Apple Pencil mit Druck, Stiftfarben, Strichstärken, Textmarker, Radiergummi, Rückgängig/Wiederholen, Verschieben und Zoomen (Finger/Pinch, Mausrad, Strg+Mausrad), mehrseitig, Papierarten (liniert, kariert, gepunktet, blanko), Bilder einfügen/verschieben/skalieren, PDF-Seiten als Schreibunterlage. Striche werden als Vektordaten gespeichert |
+| Handschriftliche Aufgaben | Aufgabenbereich unten auf der Seite (Kästchen + Schreiblinie je Zeile, antippen = abhaken). Bei „Neue Seite“ und beim Anlegen der nächsten Handschrift-Notiz werden offene, beschriebene Zeilen auf Wunsch samt Handschrift übernommen; an der alten Stelle zeigt ein blauer Pfeil „übertragen“ (antippen hebt das auf). So wandert jede Aufgabe genau einmal weiter |
 | Pencil vs. Finger | Standard: Pencil schreibt, Finger verschiebt und zoomt. Umschaltbar („Mit Finger zeichnen“). Handballen-Erkennung: Fingereingaben werden ignoriert, während der Stift aufliegt |
-| Besprechungen | Titel, Datum/Uhrzeit, Ort, Thema, Teilnehmer, Gesprächsnotizen, Entscheidungen, Aufgaben mit Verantwortlichen und Fälligkeit, Wiedervorlage. Chronologische, durchsuchbare Liste mit Zeitraumfilter. Aufgaben direkt aus Besprechung oder markiertem Text erzeugen |
 | Aufgaben | Titel, Beschreibung, Fälligkeit, Priorität, Status (Offen, In Bearbeitung, Erledigt, Zurückgestellt), zugehörige Notiz, Projekt, Kategorie, Verantwortlich. Überfällige deutlich markiert, erledigte bleiben in der Historie |
 | Projekte & Kategorien | Frei anlegbar und bearbeitbar; Projekte mit Beschreibung, Status, Farbe sowie zugeordneten Notizen, Besprechungen und Aufgaben |
-| Suche | Lokale Volltextsuche (Wortindex) über Titel, Inhalte, Besprechungen, Aufgaben, Tags, Kategorien, Projekte; Filter nach Zeitraum, Kategorie, Projekt, Typ, Status. Umlaut-tolerant (z. B. „muller“ findet „Müller“) |
+| Suche | Lokale Volltextsuche (Wortindex) über Titel, Inhalte, Aufgaben, Tags, Kategorien, Projekte; Filter nach Zeitraum, Kategorie, Projekt, Typ, Status. Umlaut-tolerant (z. B. „muller“ findet „Müller“) |
 | Datensicherung | Vollständiger Export/Import, Wiederherstellung, Import mit Konfliktprüfung (pro Eintrag wählbar), PDF- und Markdown-Export einzelner Notizen, Export einzelner Notizen als `.tenotes`, Markdown-Import, Handschrift als PDF (Vektor) oder PNG, Erinnerung an Sicherungen |
 | Sicherheit | Optionale PIN-App-Sperre (PBKDF2-gehasht). **Ausdrücklich keine Verschlüsselung** – das wird in der App so kommuniziert |
 
@@ -34,7 +34,7 @@ Wichtig für iPadOS:
 
 - Die installierte App und ein Safari-Tab haben **getrennte Datenbestände**. Immer die installierte App verwenden.
 - Installierte Home-Bildschirm-Apps sind von Safaris automatischem Löschen nach Inaktivität ausgenommen. In einem normalen Safari-Tab kann Safari Daten nach längerer Nichtnutzung entfernen.
-- Updates erscheinen als Hinweis „Eine neue Version ist verfügbar“. Ohne Bestätigung bleibt die bisherige Version aktiv.
+- **Updates kommen automatisch:** Jede Änderung auf `main` wird per GitHub Actions gebaut und auf GitHub Pages veröffentlicht. Die App sucht beim Öffnen, beim Zurückkehren in die App und alle 30 Minuten nach einer neuen Version und übernimmt sie, sobald die App in den Hintergrund geht (nie mitten im Schreiben). Über den Hinweis „Jetzt aktualisieren“ geht es sofort. Die Daten bleiben dabei auf dem Gerät; Datenbank-Migrationen laufen beim nächsten Start automatisch.
 
 Auf Windows (Edge/Chrome) erscheint in der Adressleiste ein Installationssymbol. Für Tests genügt `http://localhost`.
 
@@ -64,7 +64,11 @@ data/attachments.json  Metadaten der Anhänge
 files/<id>             Binärdaten der Anhänge, Bilder und PDF-Hintergründe
 ```
 
-Neuere Formatversionen werden beim Import erkannt; ältere werden über `migrateBackup()` angehoben.
+Neuere Formatversionen werden beim Import erkannt; ältere werden über `migrateBackup()` angehoben. Besprechungen aus älteren Sicherungen werden dabei – wie in der Datenbank – in Textnotizen umgewandelt.
+
+### Entfernte Besprechungsplanung (ab Version 1.1)
+
+Die eigene Besprechungsfunktion ist entfallen. Datenbank-Schema 3 wandelt vorhandene Besprechungen verlustfrei in Textnotizen um: Datum, Ort, Thema und Teilnehmer stehen als Kopfzeilen am Anfang, Entscheidungen als nummerierte Liste am Ende, eine Wiedervorlage wird zur Aufgabe „Wiedervorlage: …“ mit Fälligkeitsdatum.
 
 ## Entwicklung
 
@@ -83,7 +87,7 @@ Datenbank-Migrationen: In `src/db/db.ts` für jede Schemaänderung eine neue `th
 
 ## Teststand
 
-Automatisch geprüft (Vitest, 14 Tests): Anlegen/Speichern/Suchen, Papierkorb und endgültiges Löschen, Archiv, Umbenennen von Kategorien im Suchindex, Aufgabenstatus, vollständige Sicherung und Wiederherstellung inklusive Binäranhängen und Handschrift, Konflikterkennung und Zusammenführung, Einzelnotiz-Export, Ablehnung ungültiger Dateien, Migration Schema 1 → 2, 3000 Notizen, Markdown-Rundreise.
+Automatisch geprüft (Vitest): Anlegen/Speichern/Suchen, Papierkorb und endgültiges Löschen, Archiv, Umbenennen von Kategorien im Suchindex, Aufgabenstatus, vollständige Sicherung und Wiederherstellung inklusive Binäranhängen und Handschrift, Konflikterkennung und Zusammenführung, Einzelnotiz-Export, Ablehnung ungültiger Dateien, Migration Schema 1 → 3 (Besprechungen → Textnotizen), Umwandlung alter Sicherungen, Übernahme handschriftlicher Aufgaben (Seite und nächste Notiz), 3000 Notizen, Markdown-Rundreise.
 
 Im Browser (Chromium, Windows) geprüft: Notiz- und Besprechungserfassung mit Autosave, Wiederherstellung nach Neuladen, Tabellen und Checklisten, Aufgaben aus Notizen, Handschrift mit simulierten Pencil-Ereignissen (Druck, Textmarker, Radierer, Rückgängig, Finger-Verschieben, Pinch-Zoom, Seiten), PDF-Import, PDF-Export (Text und Vektor-Handschrift), PNG-Export, Sicherung/Import/Konflikte/Wiederherstellung, Suche, vollständiger Offlinebetrieb bei gestopptem Server, 2000 zusätzliche Notizen, Smartphone-Layout, Dunkelmodus, Update-Hinweis.
 

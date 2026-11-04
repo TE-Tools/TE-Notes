@@ -1,9 +1,9 @@
 import type { JSONContent } from '@tiptap/react';
 import { db } from './db';
 import type {
-  Attachment, AttachmentKind, Category, Folder, InkPage, MeetingInfo, Note, NoteType, Project, Task
+  Attachment, AttachmentKind, Category, Folder, InkPage, Note, NoteType, Project, Task
 } from './types';
-import { COLORS, nowLocalDateTime, uid } from '../lib/util';
+import { COLORS, uid } from '../lib/util';
 import { makeExcerpt, tokenize } from '../lib/text';
 
 /* ------------------------------------------------------------------ */
@@ -95,14 +95,7 @@ async function lookupNames(categoryId: string | null, projectId: string | null, 
 export async function indexNote(note: Note, bodyText?: string) {
   if (bodyText === undefined) bodyText = (await db.bodies.get(note.id))?.text ?? '';
   const names = await lookupNames(note.categoryId, note.projectId, note.folderId);
-  const m = note.meeting;
-  const words = tokenize(
-    note.title,
-    bodyText,
-    note.tags.join(' '),
-    ...names,
-    m ? [m.topic, m.location, m.participants.join(' '), m.decisions.join(' ')].join(' ') : ''
-  );
+  const words = tokenize(note.title, bodyText, note.tags.join(' '), ...names);
   await db.search.put({ id: 'note:' + note.id, kind: 'note', refId: note.id, words });
 }
 
@@ -144,7 +137,6 @@ export interface NewNoteOptions {
   categoryId?: string | null;
   folderId?: string | null;
   tags?: string[];
-  meeting?: Partial<MeetingInfo>;
   doc?: JSONContent;
   text?: string;
 }
@@ -170,17 +162,6 @@ export async function createNote(type: NoteType, opts: NewNoteOptions = {}): Pro
     createdAt: now,
     updatedAt: now
   };
-  if (type === 'meeting') {
-    note.meeting = {
-      date: nowLocalDateTime(),
-      participants: [],
-      topic: '',
-      location: '',
-      decisions: [],
-      followUpDate: null,
-      ...opts.meeting
-    };
-  }
   if (type === 'ink') note.inkPageCount = 1;
 
   const settings = await getSettings();

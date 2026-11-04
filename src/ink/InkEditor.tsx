@@ -10,8 +10,9 @@ import type { InkImage, InkPage, InkTaskArea, InkTool, Note, PageBackground, Str
 import { BitmapCache } from './assets';
 import {
   drawPageContent, drawStroke, hitStroke, hitTaskBox, hitTaskControl, layoutPages, maxTaskRows, outlineToPath, strokeOutline,
-  taskAreaLayout, taskRowOfStroke, taskRowTop, type PageLayout
+  taskAreaLayout, taskRowOfStroke, type PageLayout
 } from './render';
+import { DEFAULT_TASK_ROWS, markCarried, openTaskRows, placeTaskRows } from './carryOver';
 import { renderPdf } from './pdfImport';
 import { pickFiles } from '../components/FileSave';
 import { confirmDialog, MenuButton, Modal, toast, toastError } from '../components/ui';
@@ -30,8 +31,6 @@ type Command =
   | { t: 'img-del'; pageId: string; image: InkImage; index: number }
   | { t: 'clear'; pageId: string; strokes: Stroke[]; images: InkImage[] }
   | { t: 'tasks'; pageId: string; before: InkTaskArea | null; after: InkTaskArea | null };
-
-const DEFAULT_TASK_ROWS = 10;
 
 const PEN_SIZES = [1.6, 2.6, 4.2];
 const HL_SIZES = [12, 18, 28];
@@ -493,9 +492,13 @@ export function InkEditor({ note }: { note: Note }) {
       return;
     }
     const checked = Array.from({ length: cur }, (_, i) => !!area.checked[i]);
+    const carried = Array.from({ length: cur }, (_, i) => !!area.carried?.[i]);
     let next: boolean[];
-    if (rows > cur) next = [...Array(rows - cur).fill(false), ...checked];
-    else {
+    let nextCarried: boolean[];
+    if (rows > cur) {
+      next = [...Array(rows - cur).fill(false), ...checked];
+      nextCarried = [...Array(rows - cur).fill(false), ...carried];
+    } else {
       const drop = cur - rows;
       const used = page.strokes.some((st) => {
         const r = taskRowOfStroke(page, st);
@@ -506,8 +509,9 @@ export function InkEditor({ note }: { note: Note }) {
         return;
       }
       next = checked.slice(drop);
+      nextCarried = carried.slice(drop);
     }
-    const cmd: Command = { t: 'tasks', pageId: page.id, before: area, after: { rows, checked: next } };
+    const cmd: Command = { t: 'tasks', pageId: page.id, before: area, after: { rows, checked: next, carried: nextCarried } };
     applyCommand(cmd, false);
     pushCommand(cmd);
   };
@@ -527,9 +531,18 @@ export function InkEditor({ note }: { note: Note }) {
     const row = hitTaskBox(page, w.x, w.y - top, tol);
     if (row < 0 || !page.tasks) return false;
     const before = page.tasks;
-    const checked = [...before.checked];
-    checked[row] = !checked[row];
-    const cmd: Command = { t: 'tasks', pageId: page.id, before, after: { ...before, checked } };
+    let after: InkTaskArea;
+    if (before.carried?.[row] && !before.checked[row]) {
+      // Pfeil antippen: Übertragung aufheben (Aufgabe gilt wieder als offen)
+      const carried = [...before.carried];
+      carried[row] = false;
+      after = { ...before, carried };
+    } else {
+      const checked = [...before.checked];
+      checked[row] = !checked[row];
+      after = { ...before, checked };
+    }
+    const cmd: Command = { t: 'tasks', pageId: page.id, before, after };
     applyCommand(cmd, false);
     pushCommand(cmd);
     return true;
@@ -930,20 +943,6 @@ export function InkEditor({ note }: { note: Note }) {
 
   const curPage = () => pagesRef.current[Math.min(currentPage, pagesRef.current.length - 1)];
 
-  /** Nicht abgehakte Aufgabenzeilen mit Handschrift (für „offene Aufgaben übernehmen“) */
-  const openTaskRows = (page: InkPage) => {
-    if (!page.tasks) return [];
-    const rows = taskAreaLayout(page, page.tasks).rows;
-    const byRow = new Map<number, Stroke[]>();
-    for (const st of page.strokes) {
-      const r = taskRowOfStroke(page, st);
-      if (r < 0 || page.tasks.checked[r]) continue;
-      if (!byRow.has(r)) byRow.set(r, []);
-      byRow.get(r)!.push(st);
-    }
-    return rows.filter((r) => byRow.has(r.index)).map((r) => ({ rowTop: taskRowTop(r), strokes: byRow.get(r.index)! }));
-  };
-
   const scrollToPage = (idx: number) => {
     const l = layoutRef.current[idx];
     if (!l) return;
@@ -967,32 +966,35 @@ export function InkEditor({ note }: { note: Note }) {
   const addPage = async () => {
     saveDebounced.flush();
     const cur = curPage();
-    const p = newInkPage(note.id, 0, cur && !cur.bgAttachmentId ? cur.background : settings.defaultPageBackground);
+    let p = newInkPage(note.id, 0, cur && !cur.bgAttachmentId ? cur.background : settings.defaultPageBackground);
+    let carriedFrom: { pageId: string; rows: number[] } | null = null;
     if (cur?.tasks) {
-      p.tasks = { rows: cur.tasks.rows, checked: [] };
+      p.tasks = { rows: cur.tasks.rows, checked: [], carried: [] };
       const open = openTaskRows(cur);
       if (open.length) {
         const ok = await confirmDialog({
           title: 'Offene Aufgaben übernehmen?',
-          text: `Auf dieser Seite ${open.length === 1 ? 'ist 1 Aufgabe' : `sind ${open.length} Aufgaben`} noch nicht abgehakt. Sollen sie auf die neue Seite übernommen werden?`,
+          text: `Auf dieser Seite ${open.length === 1 ? 'ist 1 Aufgabe' : `sind ${open.length} Aufgaben`} noch nicht abgehakt. Sollen sie auf die neue Seite übernommen werden? Hier werden sie dann mit einem Pfeil als übertragen markiert.`,
           confirmLabel: 'Übernehmen',
           cancelLabel: 'Nicht übernehmen'
         });
         if (ok) {
-          p.tasks.rows = clamp(Math.max(p.tasks.rows, open.length), 1, maxTaskRows(p));
-          const newRows = taskAreaLayout(p, p.tasks).rows;
-          open.slice(0, newRows.length).forEach((o, i) => {
-            const dy = taskRowTop(newRows[i]) - o.rowTop;
-            for (const st of o.strokes) {
-              const pts = st.points.slice();
-              for (let k = 1; k < pts.length; k += 3) pts[k] = +(pts[k] + dy).toFixed(2);
-              p.strokes.push({ ...st, id: uid(), points: pts });
-            }
-          });
+          const r = placeTaskRows(p, open);
+          p = r.page;
+          carriedFrom = { pageId: cur.id, rows: r.placed.map((x) => x.row) };
+          if (r.placed.length < open.length) toast(`${r.placed.length} von ${open.length} Aufgaben übernommen – mehr passen nicht auf die Seite`);
         }
       }
     }
-    const pages = [...pagesRef.current];
+    let pages = [...pagesRef.current];
+    if (carriedFrom) {
+      const cf = carriedFrom;
+      pages = pages.map((x) => (x.id === cf.pageId ? markCarried(x, cf.rows) : x));
+      // Rückgängig-Verlauf: Befehle mit veralteten Aufgabenbereichen dieser Seite entfernen
+      undoRef.current = undoRef.current.filter((c) => !(c.t === 'tasks' && c.pageId === cf.pageId));
+      redoRef.current = redoRef.current.filter((c) => !(c.t === 'tasks' && c.pageId === cf.pageId));
+      setHistoryVersion((v) => v + 1);
+    }
     pages.splice(currentPage + 1, 0, p);
     await reindexPages(pages);
     scrollToPage(currentPage + 1);
@@ -1218,7 +1220,7 @@ export function InkEditor({ note }: { note: Note }) {
                     { label: 'Aufgabenbereich: ganze Seite', icon: <ListChecks size={17} />, onClick: () => changeTaskRows(999) },
                     { label: 'Aufgabenbereich entfernen', icon: <ListChecks size={17} />, onClick: () => setTaskArea(null) }
                   ]
-                : [{ label: 'Aufgabenbereich unten einfügen', icon: <ListChecks size={17} />, onClick: () => setTaskArea({ rows: DEFAULT_TASK_ROWS, checked: [] }) }]),
+                : [{ label: 'Aufgabenbereich unten einfügen', icon: <ListChecks size={17} />, onClick: () => setTaskArea({ rows: DEFAULT_TASK_ROWS, checked: [], carried: [] }) }]),
               'sep',
               { label: 'Seite leeren', icon: <Eraser size={17} />, onClick: clearPage },
               { label: 'Seite löschen', icon: <Trash2 size={17} />, onClick: deletePage, danger: true }

@@ -58,7 +58,7 @@ export default function SearchPage() {
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Notizen, Besprechungen, Aufgaben, Tags, Projekte …"
+            placeholder="Notizen, Handschrift, Aufgaben, Tags, Projekte …"
             aria-label="Suchbegriff"
             enterKeyHint="search"
           />
@@ -73,7 +73,6 @@ export default function SearchPage() {
             <option value="">Alle Typen</option>
             <option value="text">Textnotizen</option>
             <option value="ink">Handschrift</option>
-            <option value="meeting">Besprechungen</option>
             <option value="task">Aufgaben</option>
           </select>
           <select className="select" value={f.projectId ?? ''} onChange={(e) => set({ projectId: e.target.value })} aria-label="Projekt">

@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
-  Archive, CheckSquare, FileText, FolderKanban, Home, Menu as MenuIcon, PenLine, Search, Settings, Trash2, Users
+  Archive, CheckSquare, FileText, FolderKanban, Home, Menu as MenuIcon, PenLine, Search, Settings, Trash2
 } from 'lucide-react';
 import { db } from '../db/db';
 import { useLookups } from '../lib/hooks';
@@ -79,7 +79,6 @@ function useCounts() {
     return {
       all: await db.notes.where('[archived+deletedAt]').equals([0, 0]).count(),
       ink: await byType('ink'),
-      meetings: await byType('meeting'),
       archive: await db.notes.where('[archived+deletedAt]').equals([1, 0]).count(),
       trash: (await db.notes.where('deletedAt').above(0).count()) + (await db.tasks.where('deletedAt').above(0).count()),
       tasks: open.length,
@@ -121,7 +120,6 @@ function Sidebar({ open }: { open: boolean }) {
         {item('/', <Home size={20} />, 'Dashboard')}
         {item('/notes', <FileText size={20} />, 'Alle Notizen', counts?.all)}
         {item('/ink', <PenLine size={20} />, 'Handschriftliche Notizen', counts?.ink)}
-        {item('/meetings', <Users size={20} />, 'Besprechungen', counts?.meetings)}
         {item('/tasks', <CheckSquare size={20} />, 'Aufgaben', counts?.overdue || counts?.tasks, !!counts?.overdue)}
         {item('/projects', <FolderKanban size={20} />, 'Projekte')}
         {activeProjects.length > 0 && (

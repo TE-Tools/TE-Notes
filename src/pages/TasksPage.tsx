@@ -160,7 +160,7 @@ export default function TasksPage() {
 
         {all && filtered.length === 0 ? (
           <Empty icon={<CheckCircle2 size={34} />} title={tab === 'open' ? 'Keine offenen Aufgaben' : 'Keine Aufgaben'}>
-            {tab === 'open' && 'Aufgaben lassen sich auch direkt aus Notizen und Besprechungen erzeugen.'}
+            {tab === 'open' && 'Aufgaben lassen sich auch direkt aus Notizen erzeugen (Text markieren → „Als Aufgabe“).'}
           </Empty>
         ) : (
           groups.map((g) => (

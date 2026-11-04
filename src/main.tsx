@@ -4,8 +4,8 @@ import { createRoot } from 'react-dom/client';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App';
 import { db } from './db/db';
-import { ensureSeeded } from './db/repo';
-import { installLifecycleFlush } from './lib/saver';
+import { ensureSeeded, rebuildSearchIndex } from './db/repo';
+import { flushAll, installLifecycleFlush } from './lib/saver';
 import { clearReloadFlag } from './lib/lazyRetry';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './styles.css';
@@ -60,6 +60,13 @@ async function start() {
     return;
   }
 
+  // Nach einer Datenbank-Migration den Suchindex im Hintergrund neu aufbauen
+  void db.settings.get('reindexPending').then(async (r) => {
+    if (!r?.value) return;
+    await rebuildSearchIndex();
+    await db.settings.delete('reindexPending');
+  }).catch((e) => console.warn('Suchindex konnte nicht neu aufgebaut werden', e));
+
   // Dauerhaften Speicher anfordern (Schutz vor automatischem Löschen durch den Browser)
   navigator.storage?.persist?.().catch(() => {});
 
@@ -78,16 +85,51 @@ async function start() {
     </StrictMode>
   );
 
-  if ('serviceWorker' in navigator && import.meta.env.PROD) {
-    const updateSW = registerSW({
-      onNeedRefresh() {
-        window.dispatchEvent(new CustomEvent('te-sw-update', { detail: () => updateSW(true) }));
-      },
-      onOfflineReady() {
-        window.dispatchEvent(new Event('te-sw-offline-ready'));
-      }
-    });
-  }
+  if ('serviceWorker' in navigator && import.meta.env.PROD) setupUpdates();
+}
+
+/**
+ * Automatische Updates: Die App sucht beim Öffnen, beim Zurückkehren in die App und alle 30 Minuten
+ * nach einer neuen Version. Eine gefundene Version wird übernommen, sobald die App in den Hintergrund
+ * geht (oder sofort über „Jetzt aktualisieren“) – nie mitten im Schreiben. Die Daten bleiben dabei
+ * unverändert auf dem Gerät; nötige Datenbank-Migrationen laufen beim nächsten Start automatisch.
+ */
+function setupUpdates() {
+  let pending = false;
+  let applying = false;
+  const apply = () => {
+    if (applying) return;
+    applying = true;
+    flushAll();
+    // kurz warten, damit gerade entprellte Änderungen gespeichert sind
+    setTimeout(() => void updateSW(true), 400);
+  };
+  const updateSW = registerSW({
+    immediate: true,
+    onNeedRefresh() {
+      pending = true;
+      if (document.visibilityState === 'hidden') apply();
+      else window.dispatchEvent(new CustomEvent('te-sw-update', { detail: apply }));
+    },
+    onOfflineReady() {
+      window.dispatchEvent(new Event('te-sw-offline-ready'));
+    },
+    onRegisteredSW(_url, reg) {
+      if (!reg) return;
+      const check = () => {
+        if (navigator.onLine === false) return;
+        reg.update().catch(() => {});
+      };
+      setInterval(check, 30 * 60_000);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') check();
+      });
+      window.addEventListener('online', check);
+    }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && pending) apply();
+  });
 }
 
 start();

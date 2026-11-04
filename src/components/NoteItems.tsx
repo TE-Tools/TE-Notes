@@ -1,14 +1,15 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { FileText, PenLine, Pin, Users } from 'lucide-react';
+import { FileText, PenLine, Pin } from 'lucide-react';
 import type { Note, NoteType } from '../db/types';
 import { NOTE_TYPE_LABEL } from '../db/types';
 import type { Lookups } from '../lib/hooks';
-import { fmtDateTime, fmtRelative } from '../lib/util';
+import { fmtRelative } from '../lib/util';
 import { createNote, type NewNoteOptions } from '../db/repo';
-import { toastError } from './ui';
+import { confirmDialog, toast, toastError } from './ui';
+import { carryIntoNote, findCarrySource } from '../ink/carryOver';
 
 export function TypeIcon({ type, size = 19 }: { type: NoteType; size?: number }) {
-  const Icon = type === 'ink' ? PenLine : type === 'meeting' ? Users : FileText;
+  const Icon = type === 'ink' ? PenLine : FileText;
   return (
     <div className={'type-icon ' + type} title={NOTE_TYPE_LABEL[type]}>
       <Icon size={size} />
@@ -17,11 +18,6 @@ export function TypeIcon({ type, size = 19 }: { type: NoteType; size?: number })
 }
 
 function subtitle(n: Note) {
-  if (n.type === 'meeting' && n.meeting) {
-    const parts = [fmtDateTime(n.meeting.date)];
-    if (n.meeting.participants.length) parts.push(n.meeting.participants.join(', '));
-    return parts.join(' · ');
-  }
   if (n.type === 'ink') return `${n.inkPageCount ?? 1} Seite${(n.inkPageCount ?? 1) === 1 ? '' : 'n'} · Handschrift`;
   return n.excerpt || 'Kein weiterer Text';
 }
@@ -102,7 +98,23 @@ export function useCreateNote() {
   const navigate = useNavigate();
   return async (type: NoteType, opts: NewNoteOptions = {}) => {
     try {
+      // Handschrift: offene Aufgaben der letzten Handschrift-Notiz anbieten
+      const source = type === 'ink' ? await findCarrySource().catch(() => null) : null;
+      let take = false;
+      if (source?.open.length) {
+        const k = source.open.length;
+        take = await confirmDialog({
+          title: 'Offene Aufgaben übernehmen?',
+          text: `In „${source.note.title || 'Ohne Titel'}“ ${k === 1 ? 'ist 1 handschriftliche Aufgabe' : `sind ${k} handschriftliche Aufgaben`} noch nicht abgehakt. Sollen sie in die neue Notiz übernommen werden? Dort werden sie mit einem Pfeil als übertragen markiert.`,
+          confirmLabel: 'Übernehmen',
+          cancelLabel: 'Nicht übernehmen'
+        });
+      }
       const id = await createNote(type, opts);
+      if (source) {
+        const n = await carryIntoNote(id, take ? source.open : []);
+        if (take && n < source.open.length) toast(`${n} von ${source.open.length} Aufgaben übernommen – mehr passen nicht auf die Seite`);
+      }
       navigate(`/note/${id}`, { state: { fresh: true } });
     } catch (e) {
       toastError(e, 'Notiz konnte nicht angelegt werden');

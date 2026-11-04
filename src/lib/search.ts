@@ -42,8 +42,7 @@ function noteMatches(n: Note, f: SearchFilters) {
     if (f.status === 'archived' && !n.archived) return false;
     if (f.status === 'pinned' && !n.pinned) return false;
   }
-  const day = n.type === 'meeting' && n.meeting ? n.meeting.date.slice(0, 10) : dayOf(n.updatedAt);
-  return inRange(day, f);
+  return inRange(dayOf(n.updatedAt), f);
 }
 
 function taskMatches(t: Task, f: SearchFilters) {

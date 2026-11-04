@@ -90,6 +90,7 @@ export async function exportInkPdf(note: Note, pages: InkPage[]): Promise<Blob> 
       for (const r of rows) {
         const b = r.box;
         const done = !!page.tasks.checked[r.index];
+        const carried = !done && !!page.tasks.carried?.[r.index];
         pdf.setDrawColor(213, 219, 229);
         pdf.setLineWidth(0.6);
         pdf.line(r.lineX0 * k, r.lineY * k, r.lineX1 * k, r.lineY * k);
@@ -97,11 +98,23 @@ export async function exportInkPdf(note: Note, pages: InkPage[]): Promise<Blob> 
         if (done) {
           pdf.setDrawColor(22, 163, 74);
           pdf.setFillColor(220, 252, 231);
+        } else if (carried) {
+          pdf.setDrawColor(47, 95, 179);
+          pdf.setFillColor(227, 235, 248);
         } else {
           pdf.setDrawColor(123, 132, 148);
           pdf.setFillColor(255, 255, 255);
         }
         pdf.roundedRect(b.x * k, b.y * k, b.s * k, b.s * k, 4 * k, 4 * k, 'FD');
+        if (carried) {
+          pdf.setLineWidth(2.1);
+          pdf.setLineCap('round');
+          pdf.setLineJoin('round');
+          const y = (b.y + b.s * 0.5) * k;
+          pdf.line((b.x + b.s * 0.2) * k, y, (b.x + b.s * 0.8) * k, y);
+          pdf.lines([[b.s * 0.24 * k, b.s * 0.23 * k], [-b.s * 0.24 * k, b.s * 0.23 * k]], (b.x + b.s * 0.56) * k, (b.y + b.s * 0.27) * k, [1, 1], 'S', false);
+          pdf.setLineCap('butt');
+        }
         if (done) {
           pdf.setLineWidth(2.4);
           pdf.setLineCap('round');

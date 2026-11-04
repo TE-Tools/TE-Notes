@@ -1,8 +1,9 @@
 import Dexie, { type Table } from 'dexie';
 import { cursorFallbackMiddleware } from './cursorFallback';
 import type {
-  Attachment, Category, Folder, InkPage, MeetingInfo, Note, NoteBody, Project, SearchEntry, Setting, Task
+  Attachment, Category, Folder, InkPage, Note, NoteBody, Project, SearchEntry, Setting, Task
 } from './types';
+import { convertLegacyMeeting, isLegacyMeeting } from './legacyMeeting';
 
 export const DB_NAME = 'te-notes';
 
@@ -52,7 +53,7 @@ export class TeNotesDB extends Dexie {
         await tx
           .table('notes')
           .toCollection()
-          .modify((n: Note) => {
+          .modify((n: { type: string; meeting?: Record<string, unknown> }) => {
             if (n.type === 'meeting' && n.meeting) {
               n.meeting.location ??= '';
               n.meeting.followUpDate ??= null;
@@ -61,7 +62,29 @@ export class TeNotesDB extends Dexie {
           });
       });
 
-    // Beim Lesen unvollständige Besprechungsdaten (ältere Versionen, Importe) ergänzen,
+    // Version 3: Besprechungsplanung entfällt. Besprechungen werden zu Textnotizen
+    // (Kopfdaten und Entscheidungen im Inhalt, Wiedervorlage als Aufgabe). Nichts geht verloren.
+    this.version(3)
+      .stores({
+        notes:
+          'id, type, updatedAt, createdAt, pinned, archived, archivedAt, deletedAt, categoryId, projectId, folderId, *tags, [archived+deletedAt], [type+archived+deletedAt]'
+      })
+      .upgrade(async (tx) => {
+        const notes = tx.table('notes');
+        const bodies = tx.table('bodies');
+        const tasks = tx.table('tasks');
+        const meetings = (await notes.toArray()).filter(isLegacyMeeting);
+        for (const raw of meetings) {
+          const { note, body, task } = convertLegacyMeeting(raw, await bodies.get(raw.id));
+          await notes.put(note);
+          await bodies.put(body);
+          if (task && !(await tasks.get(task.id))) await tasks.put(task);
+        }
+        // Suchindex beim nächsten Start neu aufbauen (Inhalte/Aufgaben haben sich geändert)
+        if (meetings.length) await tx.table('settings').put({ key: 'reindexPending', value: true });
+      });
+
+    // Beim Lesen unvollständige Daten (ältere Versionen, Importe) ergänzen,
     // damit einzelne fehlerhafte Einträge keine Seite zum Absturz bringen.
     this.notes.hook('reading', (n: Note) => normalizeNote(n));
   }
@@ -75,23 +98,10 @@ export function normalizeNote(n: Note): Note {
   if (!n) return n;
   if (!Array.isArray(n.tags)) n.tags = strList(n.tags);
   if (typeof n.title !== 'string') n.title = str(n.title);
-  if (n.type === 'meeting') {
-    const m = (n.meeting ?? {}) as Partial<MeetingInfo>;
-    let date = str(m.date);
-    if (date && isNaN(new Date(date.length <= 10 ? date + 'T00:00' : date).getTime())) date = '';
-    n.meeting = {
-      date,
-      participants: strList(m.participants),
-      topic: str(m.topic),
-      location: str(m.location),
-      decisions: strList(m.decisions),
-      followUpDate: typeof m.followUpDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(m.followUpDate) ? m.followUpDate : null
-    };
-  }
   return n;
 }
 
-export const DB_SCHEMA_VERSION = 2;
+export const DB_SCHEMA_VERSION = 3;
 
 export let db = new TeNotesDB();
 

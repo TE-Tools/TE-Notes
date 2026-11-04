@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { AlertTriangle, Archive, BellRing, CheckCircle2, FileText, PenLine, Plus, ShieldCheck, Users } from 'lucide-react';
+import { AlertTriangle, Archive, CheckCircle2, FileText, PenLine, Plus, ShieldCheck } from 'lucide-react';
 import { db } from '../db/db';
-import { isActive, pinnedNotes, recentNotes } from '../db/repo';
+import { pinnedNotes, recentNotes } from '../db/repo';
 import type { Task } from '../db/types';
 import { useLookups, useSettings } from '../lib/hooks';
-import { fmtDate, fmtLongDate, fmtRelative, greeting, todayISO } from '../lib/util';
+import { fmtLongDate, fmtRelative, greeting, todayISO } from '../lib/util';
 import { NoteCard, NoteRow, useCreateNote } from '../components/NoteItems';
 import { TaskModal, TaskRow } from '../components/TaskItems';
 import { Empty } from '../components/ui';
@@ -34,13 +34,6 @@ export default function Dashboard() {
     () => db.notes.where('archivedAt').above(0).reverse().filter((n) => !n.deletedAt && n.archived === 1).limit(5).toArray(),
     []
   );
-  const followUps = useLiveQuery(async () => {
-    const limit = todayISO(new Date(Date.now() + 7 * 86400000));
-    const meetings = await db.notes.where('type').equals('meeting').filter(isActive).toArray();
-    return meetings
-      .filter((m) => m.meeting?.followUpDate && m.meeting.followUpDate <= limit)
-      .sort((a, b) => a.meeting!.followUpDate!.localeCompare(b.meeting!.followUpDate!));
-  }, []);
 
   const days = settings.lastBackupAt ? Math.floor((Date.now() - settings.lastBackupAt) / 86400000) : null;
   const hasData = (recent?.length ?? 0) > 0;
@@ -75,15 +68,6 @@ export default function Dashboard() {
               <div>
                 <div className="quick-title">Neue Handschrift-Notiz</div>
                 <div className="quick-sub">Für Apple Pencil</div>
-              </div>
-            </button>
-            <button className="quick" onClick={() => create('meeting')}>
-              <div className="quick-icon" style={{ background: 'var(--ok-soft)', color: 'var(--ok)' }}>
-                <Users size={22} />
-              </div>
-              <div>
-                <div className="quick-title">Neue Besprechung</div>
-                <div className="quick-sub">Protokoll mit Aufgaben</div>
               </div>
             </button>
           </div>
@@ -122,7 +106,7 @@ export default function Dashboard() {
               </div>
               {recent && recent.length === 0 ? (
                 <Empty icon={<FileText size={34} />} title="Noch keine Notizen">
-                  Legen Sie oben Ihre erste Notiz, Handschrift oder Besprechung an.
+                  Legen Sie oben Ihre erste Notiz oder Handschrift an.
                 </Empty>
               ) : (
                 <div className="note-grid">
@@ -171,25 +155,6 @@ export default function Dashboard() {
                 </div>
               )}
             </section>
-            {(followUps?.length ?? 0) > 0 && (
-              <section className="section">
-                <div className="section-head">
-                  <h2 className="section-title">
-                    <BellRing size={17} /> Wiedervorlagen
-                  </h2>
-                </div>
-                <div className="list">
-                  {followUps!.map((n) => (
-                    <NoteRow
-                      key={n.id}
-                      n={n}
-                      lookups={lookups}
-                      side={(n.meeting!.followUpDate! < todayISO() ? '⚠ ' : '') + fmtDate(n.meeting!.followUpDate)}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
             {(archived?.length ?? 0) > 0 && (
               <section className="section">
                 <div className="section-head">

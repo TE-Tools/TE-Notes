@@ -4,17 +4,17 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import type { JSONContent } from '@tiptap/react';
 import {
   Archive, ArchiveRestore, Check, ChevronLeft, Copy, FileDown, FileText, Image as ImageIcon, Loader2, MoreHorizontal, Paperclip,
-  Pin, PinOff, Plus, Printer, RotateCcw, SlidersHorizontal, Trash2, X, Package
+  Pin, PinOff, Printer, RotateCcw, SlidersHorizontal, Trash2, X, Package
 } from 'lucide-react';
 import { db } from '../db/db';
 import {
-  addAttachment, archiveNote, createTask, deleteAttachment, deleteNotePermanently, duplicateNote, restoreNote, saveNoteBody,
+  addAttachment, archiveNote, deleteAttachment, deleteNotePermanently, duplicateNote, restoreNote, saveNoteBody,
   setPinned, trashNote, updateNote
 } from '../db/repo';
-import type { MeetingInfo, Note, NoteBody, Task } from '../db/types';
+import type { Note, NoteBody, Task } from '../db/types';
 import { NOTE_TYPE_LABEL } from '../db/types';
 import { useLookups, type Lookups } from '../lib/hooks';
-import { debounce, fmtBytes, fmtDateTime, safeFileName, todayISO } from '../lib/util';
+import { debounce, fmtBytes, fmtDateTime, safeFileName } from '../lib/util';
 import { markDirty, registerFlusher, track, useSaveState } from '../lib/saver';
 import { RichEditor } from '../editor/RichEditor';
 import { InkEditor, loadInkPages } from '../ink/InkEditor';
@@ -54,7 +54,7 @@ const openNotes = new Set<string>();
 
 async function discardIfEmpty(id: string) {
   const n = await db.notes.get(id);
-  if (!n || n.title.trim() || n.tags.length || n.pinned || n.archived || n.deletedAt || n.type === 'meeting') return;
+  if (!n || n.title.trim() || n.tags.length || n.pinned || n.archived || n.deletedAt) return;
   if (Date.now() - n.createdAt > 6 * 3600_000) return; // nur frisch angelegte
   if (await db.attachments.where('noteId').equals(id).count()) return;
   if (await db.tasks.where('noteId').equals(id).count()) return;
@@ -90,7 +90,6 @@ function Editor({ note, initialDoc }: { note: Note; initialDoc: JSONContent | nu
   const [taskModal, setTaskModal] = useState<Task | Partial<Task> | null>(null);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const readOnly = note.deletedAt > 0;
-  const meetingState = useMeetingState(note);
 
   // Titel automatisch speichern
   const saveTitle = useMemo(
@@ -166,7 +165,7 @@ function Editor({ note, initialDoc }: { note: Note; initialDoc: JSONContent | nu
 
   const goBack = () => {
     if (window.history.length > 1 && location.key !== 'default') navigate(-1);
-    else navigate(note.type === 'meeting' ? '/meetings' : note.type === 'ink' ? '/ink' : '/notes');
+    else navigate(note.type === 'ink' ? '/ink' : '/notes');
   };
 
   const exp = useExport(note, lookups);
@@ -305,7 +304,7 @@ function Editor({ note, initialDoc }: { note: Note; initialDoc: JSONContent | nu
             className="title-input"
             rows={1}
             value={title}
-            placeholder={note.type === 'meeting' ? 'Titel der Besprechung' : 'Titel'}
+            placeholder="Titel"
             onChange={(e) => onTitle(e.target.value.replace(/\n/g, ' '))}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -317,17 +316,11 @@ function Editor({ note, initialDoc }: { note: Note; initialDoc: JSONContent | nu
             aria-label="Titel"
           />
           <MetaBar note={note} lookups={lookups} />
-          {note.type === 'meeting' && note.meeting && <MeetingHeader state={meetingState} />}
-          {note.type === 'meeting' && (
-            <div className="meeting-section" style={{ marginTop: 18 }}>
-              <h3>Gesprächsnotizen</h3>
-            </div>
-          )}
           <div style={readOnly ? { pointerEvents: 'none', opacity: 0.85 } : undefined}>
             <RichEditor
               initial={initialDoc ?? { type: 'doc', content: [{ type: 'paragraph' }] }}
               onChange={onBody}
-              placeholder={note.type === 'meeting' ? 'Notizen zum Gesprächsverlauf …' : 'Schreiben Sie los …'}
+              placeholder="Schreiben Sie los …"
               onAttach={async () => {
                 const files = await pickFiles('*/*', true);
                 for (const f of files) {
@@ -342,8 +335,7 @@ function Editor({ note, initialDoc }: { note: Note; initialDoc: JSONContent | nu
               onCreateTask={(text) => setTaskModal({ title: text, noteId: note.id, projectId: note.projectId, categoryId: note.categoryId })}
             />
           </div>
-          {note.type === 'meeting' && note.meeting && <MeetingFooter note={note} state={meetingState} tasks={tasks} onOpenTask={setTaskModal} />}
-          {note.type === 'text' && tasks.length > 0 && (
+          {tasks.length > 0 && (
             <div className="meeting-section">
               <h3>Aufgaben aus dieser Notiz</h3>
               <div className="list">
@@ -442,167 +434,6 @@ function MetaBar({ note, lookups, vertical }: { note: Note; lookups: Lookups; ve
         <TagInput value={note.tags} onChange={(tags) => set({ tags })} placeholder="+ Tags" suggestions={allTags} />
       </div>
     </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Besprechung                                                         */
-/* ------------------------------------------------------------------ */
-
-const EMPTY_MEETING: MeetingInfo = { date: '', participants: [], topic: '', location: '', decisions: [], followUpDate: null };
-type MeetingState = readonly [MeetingInfo, (patch: Partial<MeetingInfo>) => void];
-
-function useMeetingState(note: Note): MeetingState {
-  const [m, setM] = useState<MeetingInfo>(note.meeting ?? EMPTY_MEETING);
-  const save = useMemo(
-    () =>
-      debounce((next: MeetingInfo) => {
-        markDirty(-1);
-        void track(updateNote(note.id, { meeting: next })).catch(() => {});
-      }, 450),
-    [note.id]
-  );
-  useEffect(() => {
-    const off = registerFlusher(() => save.flush());
-    return () => {
-      off();
-      save.flush();
-    };
-  }, [save]);
-  const update = (patch: Partial<MeetingInfo>) => {
-    setM((prev) => {
-      const next = { ...prev, ...patch };
-      if (!save.pending()) markDirty(1);
-      save(next);
-      return next;
-    });
-  };
-  return [m, update] as const;
-}
-
-function MeetingHeader({ state }: { state: MeetingState }) {
-  const [m, update] = state;
-  const participantsSuggest = useLiveQuery(async () => {
-    const ms = await db.notes.where('type').equals('meeting').limit(200).toArray();
-    return [...new Set(ms.flatMap((x) => x.meeting?.participants ?? []))].sort((a, b) => a.localeCompare(b, 'de'));
-  }, []) ?? [];
-  return (
-    <div className="meeting-grid">
-      <div className="field">
-        <label htmlFor="m-date">Datum und Uhrzeit</label>
-        <input id="m-date" type="datetime-local" className="input" value={m.date} onChange={(e) => update({ date: e.target.value })} />
-      </div>
-      <div className="field">
-        <label htmlFor="m-loc">Ort / Format</label>
-        <input id="m-loc" className="input" value={m.location} onChange={(e) => update({ location: e.target.value })} placeholder="z. B. Raum 2.04, Teams" />
-      </div>
-      <div className="field" style={{ gridColumn: '1 / -1' }}>
-        <label htmlFor="m-topic">Thema</label>
-        <input id="m-topic" className="input" value={m.topic} onChange={(e) => update({ topic: e.target.value })} placeholder="Worum geht es?" />
-      </div>
-      <div className="field">
-        <label>Teilnehmer</label>
-        <TagInput value={m.participants} onChange={(participants) => update({ participants })} placeholder="Name eingeben, Enter" suggestions={participantsSuggest} />
-      </div>
-      <div className="field">
-        <label htmlFor="m-follow">Wiedervorlage</label>
-        <div className="row" style={{ flexWrap: 'nowrap', gap: 8 }}>
-          <input id="m-follow" type="date" className="input" value={m.followUpDate ?? ''} onChange={(e) => update({ followUpDate: e.target.value || null })} />
-          {m.followUpDate && (
-            <button className="icon-btn sm" onClick={() => update({ followUpDate: null })} aria-label="Wiedervorlage entfernen">
-              <X size={17} />
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MeetingFooter({ note, state, tasks, onOpenTask }: { note: Note; state: MeetingState; tasks: Task[]; onOpenTask: (t: Task) => void }) {
-  const [m, update] = state;
-  const decisions = m.decisions.length ? m.decisions : [];
-  const [title, setTitle] = useState('');
-  const [assignee, setAssignee] = useState('');
-  const [due, setDue] = useState('');
-
-  const addTask = async () => {
-    if (!title.trim()) return;
-    try {
-      await createTask({
-        title: title.trim(), assignee: assignee.trim(), dueDate: due || null, noteId: note.id, projectId: note.projectId, categoryId: note.categoryId
-      });
-      setTitle('');
-      setAssignee('');
-      setDue('');
-    } catch (e) {
-      toastError(e);
-    }
-  };
-
-  return (
-    <>
-      <div className="meeting-section">
-        <h3>Entscheidungen</h3>
-        {decisions.map((d, i) => (
-          <div className="decision" key={i}>
-            <span className="decision-num">{i + 1}</span>
-            <textarea
-              rows={1}
-              value={d}
-              placeholder="Entscheidung festhalten …"
-              onChange={(e) => {
-                const next = [...decisions];
-                next[i] = e.target.value;
-                update({ decisions: next });
-                e.target.style.height = 'auto';
-                e.target.style.height = e.target.scrollHeight + 'px';
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  const next = [...decisions];
-                  next.splice(i + 1, 0, '');
-                  update({ decisions: next });
-                  setTimeout(() => (document.querySelectorAll('.decision textarea')[i + 1] as HTMLTextAreaElement | undefined)?.focus());
-                }
-              }}
-            />
-            <button className="icon-btn sm" onClick={() => update({ decisions: decisions.filter((_, j) => j !== i) })} aria-label="Entscheidung entfernen">
-              <X size={16} />
-            </button>
-          </div>
-        ))}
-        <button className="btn btn-sm btn-ghost" style={{ marginTop: 8 }} onClick={() => update({ decisions: [...decisions, ''] })}>
-          <Plus size={16} /> Entscheidung hinzufügen
-        </button>
-      </div>
-
-      <div className="meeting-section">
-        <h3>Aufgaben & Verantwortlichkeiten</h3>
-        {tasks.length > 0 && (
-          <div className="list">
-            {tasks.map((t) => (
-              <TaskRow key={t.id} t={t} showNote={false} onOpen={onOpenTask} />
-            ))}
-          </div>
-        )}
-        <div className="inline-task-form">
-          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Neue Aufgabe …" onKeyDown={(e) => e.key === 'Enter' && addTask()} />
-          <input className="input" value={assignee} onChange={(e) => setAssignee(e.target.value)} placeholder="Verantwortlich" list="participants-list" onKeyDown={(e) => e.key === 'Enter' && addTask()} />
-          <input className="input" type="date" value={due} onChange={(e) => setDue(e.target.value)} aria-label="Fällig am" min={todayISO()} />
-          <button className="btn btn-primary" onClick={addTask} disabled={!title.trim()}>
-            <Plus size={18} /> Anlegen
-          </button>
-          <datalist id="participants-list">
-            {m.participants.map((p) => <option key={p} value={p} />)}
-          </datalist>
-        </div>
-        <p className="small muted" style={{ marginBottom: 0 }}>
-          Tipp: Text in den Gesprächsnotizen markieren und „Als Aufgabe“ wählen.
-        </p>
-      </div>
-    </>
   );
 }
 

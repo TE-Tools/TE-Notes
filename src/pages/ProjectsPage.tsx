@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { FileText, FolderKanban, MoreHorizontal, Pencil, PenLine, Plus, Trash2, Users } from 'lucide-react';
+import { FileText, FolderKanban, MoreHorizontal, Pencil, PenLine, Plus, Trash2 } from 'lucide-react';
 import { db } from '../db/db';
 import { deleteProject, saveProject } from '../db/repo';
 import type { Project, ProjectStatus, Task } from '../db/types';
@@ -73,8 +73,7 @@ export default function ProjectsPage() {
     return projects
       .map((p) => ({
         p,
-        notes: notes.filter((n) => n.projectId === p.id && n.type !== 'meeting').length,
-        meetings: notes.filter((n) => n.projectId === p.id && n.type === 'meeting').length,
+        notes: notes.filter((n) => n.projectId === p.id).length,
         open: tasks.filter((t) => t.projectId === p.id && (t.status === 'open' || t.status === 'inprogress')).length
       }))
       .sort((a, b) => a.p.name.localeCompare(b.p.name, 'de'));
@@ -92,7 +91,7 @@ export default function ProjectsPage() {
             </span>
             <div>
               <h1 className="page-title">Projekte</h1>
-              <p className="page-sub">Notizen, Besprechungen und Aufgaben nach Projekten bündeln</p>
+              <p className="page-sub">Notizen, Handschrift und Aufgaben nach Projekten bündeln</p>
             </div>
           </div>
           <button className="btn btn-primary" onClick={() => setModal(true)}>
@@ -103,7 +102,7 @@ export default function ProjectsPage() {
           <Empty icon={<FolderKanban size={34} />} title="Noch keine Projekte" />
         ) : (
           <div className="project-grid">
-            {visible?.map(({ p, notes, meetings, open }) => (
+            {visible?.map(({ p, notes, open }) => (
               <Link key={p.id} to={`/projects/${p.id}`} className="card project-card" style={{ ['--c' as string]: p.color }}>
                 <div className="row" style={{ justifyContent: 'space-between' }}>
                   <div className="project-name">{p.name}</div>
@@ -112,7 +111,6 @@ export default function ProjectsPage() {
                 <div className="project-desc">{p.description || <span className="muted">Keine Beschreibung</span>}</div>
                 <div className="project-stats">
                   <span>{notes} Notizen</span>
-                  <span>{meetings} Besprechungen</span>
                   <span style={open ? { color: 'var(--text)' } : undefined}>{open} offene Aufgaben</span>
                 </div>
               </Link>
@@ -144,7 +142,7 @@ export function ProjectDetail() {
   const create = useCreateNote();
   const [edit, setEdit] = useState(false);
   const [taskModal, setTaskModal] = useState<Task | 'new' | null>(null);
-  const [tab, setTab] = useState<'notes' | 'meetings' | 'tasks'>('notes');
+  const [tab, setTab] = useState<'notes' | 'tasks'>('notes');
   const project = useLiveQuery(() => db.projects.get(id), [id]);
   const notes = useLiveQuery(
     () => db.notes.where('projectId').equals(id).filter((n) => !n.deletedAt).reverse().sortBy('updatedAt'),
@@ -155,8 +153,7 @@ export function ProjectDetail() {
   if (project === undefined) return <div className="page" />;
   if (!project) return <div className="page"><Empty title="Projekt nicht gefunden" /></div>;
 
-  const textNotes = notes?.filter((n) => n.type !== 'meeting') ?? [];
-  const meetings = (notes?.filter((n) => n.type === 'meeting') ?? []).sort((a, b) => (b.meeting?.date ?? '').localeCompare(a.meeting?.date ?? ''));
+  const textNotes = notes ?? [];
   const openTasks = (tasks ?? []).filter((t) => t.status !== 'done').sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999'));
   const doneTasks = (tasks ?? []).filter((t) => t.status === 'done').sort((a, b) => b.completedAt - a.completedAt);
   const opts = { projectId: project.id };
@@ -185,7 +182,6 @@ export function ProjectDetail() {
               items={[
                 { label: 'Neue Notiz', icon: <FileText size={17} />, onClick: () => create('text', opts) },
                 { label: 'Neue Handschrift', icon: <PenLine size={17} />, onClick: () => create('ink', opts) },
-                { label: 'Neue Besprechung', icon: <Users size={17} />, onClick: () => create('meeting', opts) },
                 { label: 'Neue Aufgabe', icon: <Plus size={17} />, onClick: () => setTaskModal('new') }
               ]}
             >
@@ -198,7 +194,7 @@ export function ProjectDetail() {
                 {
                   label: 'Projekt löschen', icon: <Trash2 size={17} />, danger: true,
                   onClick: async () => {
-                    if (await confirmDialog({ title: 'Projekt löschen?', text: 'Das Projekt wird entfernt. Zugeordnete Notizen, Besprechungen und Aufgaben bleiben erhalten und verlieren nur die Zuordnung.', confirmLabel: 'Projekt löschen', danger: true })) {
+                    if (await confirmDialog({ title: 'Projekt löschen?', text: 'Das Projekt wird entfernt. Zugeordnete Notizen und Aufgaben bleiben erhalten und verlieren nur die Zuordnung.', confirmLabel: 'Projekt löschen', danger: true })) {
                       await deleteProject(project.id);
                       toast('Projekt gelöscht');
                       navigate('/projects');
@@ -215,7 +211,6 @@ export function ProjectDetail() {
         <div className="toolbar-row">
           <div className="segmented">
             <button className={tab === 'notes' ? 'active' : ''} onClick={() => setTab('notes')}>Notizen <span className="muted">{textNotes.length}</span></button>
-            <button className={tab === 'meetings' ? 'active' : ''} onClick={() => setTab('meetings')}>Besprechungen <span className="muted">{meetings.length}</span></button>
             <button className={tab === 'tasks' ? 'active' : ''} onClick={() => setTab('tasks')}>Aufgaben <span className="muted">{openTasks.length}</span></button>
           </div>
         </div>
@@ -225,12 +220,6 @@ export function ProjectDetail() {
             <div className="list">{textNotes.map((n) => <NoteRow key={n.id} n={n} lookups={lookups} />)}</div>
           ) : (
             <Empty compact title="Keine Notizen in diesem Projekt" />
-          ))}
-        {tab === 'meetings' &&
-          (meetings.length ? (
-            <div className="list">{meetings.map((n) => <NoteRow key={n.id} n={n} lookups={lookups} />)}</div>
-          ) : (
-            <Empty compact title="Keine Besprechungen in diesem Projekt" />
           ))}
         {tab === 'tasks' && (
           <>

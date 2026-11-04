@@ -317,6 +317,7 @@ export function drawTaskArea(ctx: CanvasRenderingContext2D, page: InkPage, unit 
   for (const r of rows) {
     const b = r.box;
     const done = !!area.checked[r.index];
+    const carried = !done && !!area.carried?.[r.index];
     // Schreiblinie
     ctx.strokeStyle = '#d5dbe5';
     ctx.lineWidth = Math.max(0.6, unit * 0.9);
@@ -326,13 +327,27 @@ export function drawTaskArea(ctx: CanvasRenderingContext2D, page: InkPage, unit 
     ctx.stroke();
     // Kästchen
     ctx.lineWidth = 2;
-    ctx.strokeStyle = done ? '#16a34a' : '#7b8494';
-    ctx.fillStyle = done ? '#dcfce7' : '#ffffff';
+    ctx.strokeStyle = done ? '#16a34a' : carried ? '#2f5fb3' : '#7b8494';
+    ctx.fillStyle = done ? '#dcfce7' : carried ? '#e3ebf8' : '#ffffff';
     ctx.beginPath();
     if (typeof (ctx as unknown as { roundRect?: unknown }).roundRect === 'function') ctx.roundRect(b.x, b.y, b.s, b.s, 5);
     else ctx.rect(b.x, b.y, b.s, b.s);
     ctx.fill();
     ctx.stroke();
+    if (carried) {
+      // Pfeil: in eine neue Seite/Notiz übertragen
+      ctx.strokeStyle = '#2f5fb3';
+      ctx.lineWidth = 2.8;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(b.x + b.s * 0.2, b.y + b.s * 0.5);
+      ctx.lineTo(b.x + b.s * 0.8, b.y + b.s * 0.5);
+      ctx.moveTo(b.x + b.s * 0.56, b.y + b.s * 0.27);
+      ctx.lineTo(b.x + b.s * 0.8, b.y + b.s * 0.5);
+      ctx.lineTo(b.x + b.s * 0.56, b.y + b.s * 0.73);
+      ctx.stroke();
+    }
     if (done) {
       ctx.strokeStyle = '#16a34a';
       ctx.lineWidth = 3.2;

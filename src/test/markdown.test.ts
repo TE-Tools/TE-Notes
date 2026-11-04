@@ -55,18 +55,16 @@ describe('Markdown', () => {
     expect(out).toContain('| Lizenzen | 12.500 € |');
   });
 
-  it('exportiert Besprechungen mit Entscheidungen und Aufgaben', () => {
+  it('exportiert Notizen mit Aufgaben', () => {
     const note: Note = {
-      id: 'm', type: 'meeting', title: 'Lenkungskreis', excerpt: '', categoryId: null, projectId: null, folderId: null, tags: ['ppwr'],
-      pinned: 0, archived: 0, archivedAt: 0, deletedAt: 0, createdAt: 0, updatedAt: 0,
-      meeting: { date: '2026-11-03T10:00', participants: ['Anna'], topic: 'PPWR', location: 'Raum 1', decisions: ['Go'], followUpDate: '2026-11-10' }
+      id: 'm', type: 'text', title: 'Lenkungskreis', excerpt: '', categoryId: null, projectId: null, folderId: null, tags: ['ppwr'],
+      pinned: 0, archived: 0, archivedAt: 0, deletedAt: 0, createdAt: 0, updatedAt: 0
     };
     const out = noteToMarkdown(note, { type: 'doc', content: [] }, [
       { id: 't', title: 'Liste', description: '', dueDate: '2026-11-07', priority: 1, status: 'open', noteId: 'm', projectId: null, categoryId: null, assignee: 'Anna', createdAt: 0, updatedAt: 0, completedAt: 0, deletedAt: 0 }
     ], { project: 'PPWR' });
     expect(out).toContain('# Lenkungskreis');
-    expect(out).toContain('**Teilnehmer:** Anna');
-    expect(out).toContain('## Entscheidungen');
+    expect(out).toContain('#ppwr');
     expect(out).toContain('- [ ] Liste (verantwortlich: Anna, fällig: 07.11.2026');
   });
 });

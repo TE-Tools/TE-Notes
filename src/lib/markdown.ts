@@ -84,22 +84,7 @@ export function noteToMarkdown(note: Note, doc: JSONContent | null, tasks: Task[
   if (note.tags.length) meta.push(`**Tags:** ${note.tags.map((t) => '#' + t).join(' ')}`);
   meta.push(`**Erstellt:** ${fmtDateTime(note.createdAt)} · **Geändert:** ${fmtDateTime(note.updatedAt)}`);
   lines.push(meta.join('  \n'), '');
-  const m = note.meeting;
-  if (note.type === 'meeting' && m) {
-    lines.push('## Besprechung', '');
-    lines.push(`- **Datum:** ${fmtDateTime(m.date)}`);
-    if (m.location) lines.push(`- **Ort:** ${m.location}`);
-    if (m.topic) lines.push(`- **Thema:** ${m.topic}`);
-    if (m.participants.length) lines.push(`- **Teilnehmer:** ${m.participants.join(', ')}`);
-    if (m.followUpDate) lines.push(`- **Wiedervorlage:** ${fmtDate(m.followUpDate)}`);
-    lines.push('', '## Gesprächsnotizen', '');
-  }
   if (doc) lines.push(docToMarkdown(doc), '');
-  if (note.type === 'meeting' && m && m.decisions.filter(Boolean).length) {
-    lines.push('## Entscheidungen', '');
-    m.decisions.filter(Boolean).forEach((d, i) => lines.push(`${i + 1}. ${d}`));
-    lines.push('');
-  }
   if (tasks.length) {
     lines.push('## Aufgaben', '');
     for (const t of tasks) {

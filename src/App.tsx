@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useState, type ReactNode } from 'react';
-import { HashRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { GlobalUI, toast } from './components/ui';
 import { FileSaveUI } from './components/FileSave';
@@ -34,22 +34,20 @@ function UpdatePrompt() {
   const [update, setUpdate] = useState<null | (() => void)>(null);
   useEffect(() => {
     const on = (e: Event) => setUpdate(() => (e as CustomEvent<() => void>).detail);
+    const offline = () => toast('TE Notes ist jetzt offline verfügbar');
     window.addEventListener('te-sw-update', on);
-    window.addEventListener('te-sw-offline-ready', () => toast('TE Notes ist jetzt offline verfügbar'));
-    return () => window.removeEventListener('te-sw-update', on);
+    window.addEventListener('te-sw-offline-ready', offline);
+    return () => {
+      window.removeEventListener('te-sw-update', on);
+      window.removeEventListener('te-sw-offline-ready', offline);
+    };
   }, []);
   if (!update) return null;
   return (
     <div className="update-bar" role="status">
-      <span>Eine neue Version von TE Notes ist verfügbar.</span>
-      <button
-        className="btn btn-sm btn-primary"
-        onClick={() => {
-          flushAll();
-          setTimeout(update, 300);
-        }}
-      >
-        Aktualisieren
+      <span>Neue Version verfügbar – wird automatisch übernommen, sobald Sie die App verlassen.</span>
+      <button className="btn btn-sm btn-primary" onClick={update}>
+        Jetzt aktualisieren
       </button>
       <button className="btn btn-sm btn-ghost" onClick={() => setUpdate(null)}>Später</button>
     </div>
@@ -85,7 +83,7 @@ export default function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/notes" element={<NotesPage key="all" variant="all" />} />
               <Route path="/ink" element={<NotesPage key="ink" variant="ink" />} />
-              <Route path="/meetings" element={<NotesPage key="meetings" variant="meetings" />} />
+              <Route path="/meetings" element={<Navigate to="/notes" replace />} />
               <Route path="/archive" element={<NotesPage key="archive" variant="archive" />} />
               <Route path="/trash" element={<NotesPage key="trash" variant="trash" />} />
               <Route path="/note/:id" element={<NoteEditorPage />} />

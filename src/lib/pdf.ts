@@ -399,24 +399,8 @@ export async function noteToPdf(
   w.y += 4;
   w.rule();
 
-  const m = note.meeting;
-  if (note.type === 'meeting' && m) {
-    w.meta('Datum:', fmtDateTime(m.date));
-    if (m.location) w.meta('Ort:', m.location);
-    if (m.topic) w.meta('Thema:', m.topic);
-    if (m.participants.length) w.meta('Teilnehmer:', m.participants.join(', '));
-    if (m.followUpDate) w.meta('Wiedervorlage:', fmtDate(m.followUpDate));
-    w.section('Gesprächsnotizen');
-  }
   if (doc) await w.blocks(doc.content);
 
-  if (note.type === 'meeting' && m && m.decisions.filter(Boolean).length) {
-    w.section('Entscheidungen');
-    m.decisions.filter(Boolean).forEach((d, i) => {
-      w.paragraph([{ text: `${i + 1}.  `, bold: true }, { text: sanitize(d) }]);
-      w.y += 4;
-    });
-  }
   if (tasks.length) {
     w.section('Aufgaben');
     for (const t of tasks) {

@@ -1,5 +1,6 @@
 import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
 import { db, DB_SCHEMA_VERSION } from '../db/db';
+import { convertLegacyMeeting, isLegacyMeeting } from '../db/legacyMeeting';
 import type {
   Attachment, Category, Folder, InkPage, Note, NoteBody, Project, Setting, Task
 } from '../db/types';
@@ -214,13 +215,21 @@ export function migrateBackup(b: ParsedBackup): ParsedBackup {
     n.categoryId ??= null;
     n.projectId ??= null;
     n.folderId ??= null;
-    if (n.type === 'meeting' && n.meeting) {
-      n.meeting.location ??= '';
-      n.meeting.followUpDate ??= null;
-      n.meeting.decisions ??= [];
-      n.meeting.participants ??= [];
-    }
   }
+  // Besprechungen aus älteren Sicherungen in Textnotizen umwandeln (wie Datenbank-Schema 3)
+  const bodyMap = new Map(b.data.bodies.map((x) => [x.id, x]));
+  const taskIds = new Set(b.data.tasks.map((t) => t.id));
+  b.data.notes = b.data.notes.map((n) => {
+    if (!isLegacyMeeting(n)) return n;
+    const { note, body, task } = convertLegacyMeeting(n, bodyMap.get(n.id));
+    bodyMap.set(n.id, body);
+    if (task && !taskIds.has(task.id)) {
+      b.data.tasks.push(task);
+      taskIds.add(task.id);
+    }
+    return note;
+  });
+  b.data.bodies = [...bodyMap.values()];
   for (const t of b.data.tasks) {
     t.deletedAt ??= 0;
     t.completedAt ??= 0;

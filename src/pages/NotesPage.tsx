@@ -1,24 +1,22 @@
 import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Archive, ArchiveRestore, CheckSquare, FileText, LayoutGrid, List, PenLine, Plus, RotateCcw, Search, Trash2, Users } from 'lucide-react';
+import { Archive, ArchiveRestore, CheckSquare, FileText, LayoutGrid, List, PenLine, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { db } from '../db/db';
 import {
   deleteNotePermanently, deleteTaskPermanently, emptyTrash, restoreNote, restoreTask
 } from '../db/repo';
 import type { Note, NoteType } from '../db/types';
 import { useLookups } from '../lib/hooks';
-import { fmtDateTime, fmtRelative, parseLocal } from '../lib/util';
-import { search } from '../lib/search';
+import { fmtRelative } from '../lib/util';
 import { NoteCard, NoteRow, TypeIcon, useCreateNote } from '../components/NoteItems';
 import { confirmDialog, Empty, toast, toastError } from '../components/ui';
 import { SidebarToggle } from '../components/Layout';
 
-export type NotesVariant = 'all' | 'ink' | 'meetings' | 'archive' | 'trash';
+export type NotesVariant = 'all' | 'ink' | 'archive' | 'trash';
 
 const META: Record<NotesVariant, { title: string; sub: string; icon: JSX.Element }> = {
-  all: { title: 'Alle Notizen', sub: 'Text-, Handschrift- und Besprechungsnotizen', icon: <FileText size={34} /> },
+  all: { title: 'Alle Notizen', sub: 'Text- und Handschriftnotizen', icon: <FileText size={34} /> },
   ink: { title: 'Handschriftliche Notizen', sub: 'Geschrieben mit Apple Pencil, Stift oder Maus', icon: <PenLine size={34} /> },
-  meetings: { title: 'Besprechungen', sub: 'Protokolle in chronologischer Reihenfolge', icon: <Users size={34} /> },
   archive: { title: 'Archiv', sub: 'Abgelegte Notizen – jederzeit wiederherstellbar', icon: <Archive size={34} /> },
   trash: { title: 'Papierkorb', sub: 'Gelöschte Einträge – bis zum endgültigen Löschen wiederherstellbar', icon: <Trash2 size={34} /> }
 };
@@ -46,10 +44,6 @@ export default function NotesPage({ variant }: { variant: NotesVariant }) {
   const [tag, setTag] = useState('');
   const [typeFilter, setTypeFilter] = useState<'' | NoteType>('');
   const [limit, setLimit] = useState(PAGE);
-  // Besprechungen: Suche + Zeitraum
-  const [mq, setMq] = useState('');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
 
   const tags = useLiveQuery(async () => (await db.notes.orderBy('tags').uniqueKeys()) as string[], []) ?? [];
 
@@ -61,7 +55,6 @@ export default function NotesPage({ variant }: { variant: NotesVariant }) {
         if (!n.archived) return false;
       } else if (n.archived) return false;
       if (variant === 'ink' && n.type !== 'ink') return false;
-      if (variant === 'meetings' && n.type !== 'meeting') return false;
       if (typeFilter && n.type !== typeFilter) return false;
       if (projectId && n.projectId !== projectId) return false;
       if (categoryId && n.categoryId !== categoryId) return false;
@@ -72,19 +65,6 @@ export default function NotesPage({ variant }: { variant: NotesVariant }) {
   }, [variant, typeFilter, projectId, categoryId, folderId, tag]);
 
   const data = useLiveQuery(async () => {
-    if (variant === 'meetings' && (mq.trim() || from || to)) {
-      const r = await search(mq, { type: 'meeting', from: from || undefined, to: to || undefined }, 1000);
-      const notes = r.notes.filter(pred).sort((a, b) => (b.meeting?.date ?? '').localeCompare(a.meeting?.date ?? ''));
-      return { notes: notes.slice(0, limit), more: notes.length > limit };
-    }
-    // Besprechungen ohne Cursor über den Index „meeting.date“ laden: Safari meldet dort
-    // „UnknownError: Unable to open cursor“. Stattdessen alle Besprechungen holen und hier sortieren.
-    if (variant === 'meetings') {
-      const all = (await db.notes.where('type').equals('meeting').toArray())
-        .filter(pred)
-        .sort((a, b) => (b.meeting?.date ?? '').localeCompare(a.meeting?.date ?? '') || b.updatedAt - a.updatedAt);
-      return { notes: all.slice(0, limit), more: all.length > limit };
-    }
     try {
       return await queryNotes();
     } catch (e) {
@@ -98,7 +78,7 @@ export default function NotesPage({ variant }: { variant: NotesVariant }) {
       );
       return { notes: all.slice(0, limit), more: all.length > limit };
     }
-  }, [variant, sort, pred, limit, mq, from, to]);
+  }, [variant, sort, pred, limit]);
 
   async function queryNotes() {
     let coll;
@@ -106,7 +86,7 @@ export default function NotesPage({ variant }: { variant: NotesVariant }) {
     else if (variant === 'archive') coll = db.notes.orderBy('archivedAt').reverse();
     else if (sort === 'title') coll = db.notes.toCollection();
     else coll = db.notes.orderBy(sort).reverse();
-    if (sort === 'title' && variant !== 'trash' && variant !== 'archive' && variant !== 'meetings') {
+    if (sort === 'title' && variant !== 'trash' && variant !== 'archive') {
       const all = (await coll.filter(pred).toArray()).sort((a, b) => (a.title || '').localeCompare(b.title || '', 'de'));
       return { notes: all.slice(0, limit), more: all.length > limit };
     }
@@ -117,7 +97,7 @@ export default function NotesPage({ variant }: { variant: NotesVariant }) {
   const trashedTasks = useLiveQuery(() => (variant === 'trash' ? db.tasks.where('deletedAt').above(0).reverse().sortBy('deletedAt') : []), [variant]);
 
   const notes = data?.notes;
-  const isList = view === 'list' || variant === 'trash' || variant === 'meetings';
+  const isList = view === 'list' || variant === 'trash';
   const filtersActive = projectId || categoryId || folderId || tag || typeFilter;
 
   const setViewPersist = (v: 'grid' | 'list') => {
@@ -129,21 +109,7 @@ export default function NotesPage({ variant }: { variant: NotesVariant }) {
     }
   };
 
-  const newType: NoteType = variant === 'ink' ? 'ink' : variant === 'meetings' ? 'meeting' : 'text';
-
-  // Besprechungen nach Monat gruppieren
-  const groups = useMemo(() => {
-    if (variant !== 'meetings' || !notes) return null;
-    const fmt = new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' });
-    const map = new Map<string, Note[]>();
-    for (const n of notes) {
-      const d = n.meeting?.date ? parseLocal(n.meeting.date) : null;
-      const k = d && !isNaN(d.getTime()) ? fmt.format(d) : 'Ohne Datum';
-      if (!map.has(k)) map.set(k, []);
-      map.get(k)!.push(n);
-    }
-    return [...map.entries()];
-  }, [variant, notes]);
+  const newType: NoteType = variant === 'ink' ? 'ink' : 'text';
 
   const trashActions = (n: Note) => (
     <div className="row" style={{ gap: 4 }} onClick={(e) => e.preventDefault()}>
@@ -208,41 +174,27 @@ export default function NotesPage({ variant }: { variant: NotesVariant }) {
               </button>
             ) : variant !== 'archive' ? (
               <button className="btn btn-primary" onClick={() => create(newType)}>
-                <Plus size={19} /> {newType === 'ink' ? 'Neue Handschrift' : newType === 'meeting' ? 'Neue Besprechung' : 'Neue Notiz'}
+                <Plus size={19} /> {newType === 'ink' ? 'Neue Handschrift' : 'Neue Notiz'}
               </button>
             ) : null}
           </div>
         </div>
 
-        {variant === 'meetings' && (
-          <div className="filters">
-            <div className="search-box" style={{ flex: '1 1 260px', margin: 0, padding: '0 12px' }}>
-              <Search size={18} className="muted" />
-              <input value={mq} onChange={(e) => setMq(e.target.value)} placeholder="Besprechungen durchsuchen …" style={{ fontSize: 16 }} />
-            </div>
-            <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Von" title="Von" />
-            <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Bis" title="Bis" />
-          </div>
-        )}
-
         {variant !== 'trash' && (
           <div className="toolbar-row">
-            {variant !== 'meetings' && (
-              <div className="segmented">
-                <button className={view === 'grid' ? 'active' : ''} onClick={() => setViewPersist('grid')} aria-label="Kachelansicht">
-                  <LayoutGrid size={16} />
-                </button>
-                <button className={view === 'list' ? 'active' : ''} onClick={() => setViewPersist('list')} aria-label="Listenansicht">
-                  <List size={16} />
-                </button>
-              </div>
-            )}
+            <div className="segmented">
+              <button className={view === 'grid' ? 'active' : ''} onClick={() => setViewPersist('grid')} aria-label="Kachelansicht">
+                <LayoutGrid size={16} />
+              </button>
+              <button className={view === 'list' ? 'active' : ''} onClick={() => setViewPersist('list')} aria-label="Listenansicht">
+                <List size={16} />
+              </button>
+            </div>
             {variant === 'all' && (
               <select className="select" style={{ width: 'auto' }} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as NoteType | '')}>
                 <option value="">Alle Typen</option>
                 <option value="text">Textnotizen</option>
                 <option value="ink">Handschrift</option>
-                <option value="meeting">Besprechungen</option>
               </select>
             )}
             <select className="select" style={{ width: 'auto' }} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
@@ -273,7 +225,7 @@ export default function NotesPage({ variant }: { variant: NotesVariant }) {
                 ))}
               </select>
             )}
-            {variant !== 'archive' && variant !== 'meetings' && (
+            {variant !== 'archive' && (
               <select className="select" style={{ width: 'auto' }} value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
                 <option value="updatedAt">Zuletzt geändert</option>
                 <option value="createdAt">Zuletzt erstellt</option>
@@ -298,22 +250,9 @@ export default function NotesPage({ variant }: { variant: NotesVariant }) {
         )}
 
         {notes && notes.length === 0 && !(variant === 'trash' && trashedTasks?.length) ? (
-          <Empty icon={meta.icon} title={filtersActive || mq ? 'Keine passenden Einträge' : variant === 'trash' ? 'Der Papierkorb ist leer' : variant === 'archive' ? 'Das Archiv ist leer' : 'Noch nichts vorhanden'}>
+          <Empty icon={meta.icon} title={filtersActive ? 'Keine passenden Einträge' : variant === 'trash' ? 'Der Papierkorb ist leer' : variant === 'archive' ? 'Das Archiv ist leer' : 'Noch nichts vorhanden'}>
             {variant === 'archive' && 'Notizen über das Menü „Archivieren“ hierher verschieben.'}
           </Empty>
-        ) : groups ? (
-          groups.map(([month, items]) => (
-            <section key={month} className="section">
-              <div className="section-head">
-                <h2 className="section-title" style={{ textTransform: 'capitalize' }}>{month}</h2>
-              </div>
-              <div className="list">
-                {items.map((n) => (
-                  <NoteRow key={n.id} n={n} lookups={lookups} side={fmtDateTime(n.meeting?.date)} />
-                ))}
-              </div>
-            </section>
-          ))
         ) : isList ? (
           <div className="list">
             {notes?.map((n) =>

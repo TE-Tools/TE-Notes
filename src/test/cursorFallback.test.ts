@@ -11,7 +11,7 @@ beforeEach(async () => {
   __setDb(new TeNotesDB('cf-' + ++n));
   await db.open();
   for (let i = 0; i < 40; i++) {
-    const id = await createNote(i % 3 === 0 ? 'meeting' : 'text', { title: 'Notiz ' + (i % 7) });
+    const id = await createNote(i % 3 === 0 ? 'ink' : 'text', { title: 'Notiz ' + (i % 7) });
     await updateNote(id, { tags: i % 2 ? ['a', 'b'] : ['b', 'c'], pinned: i % 5 === 0 ? 1 : 0, updatedAt: 1000 + (i % 9) } as never);
     await createTask({ title: 'Aufgabe ' + i, dueDate: i % 4 ? `2026-11-${String((i % 28) + 1).padStart(2, '0')}` : null });
   }
@@ -25,7 +25,7 @@ const queries: Record<string, () => Promise<unknown>> = {
   anyOf: () => db.tasks.where('status').anyOf('open', 'inprogress').primaryKeys(),
   uniqueTags: () => db.notes.orderBy('tags').uniqueKeys(),
   uniqueTagsReverse: () => db.notes.orderBy('tags').reverse().uniqueKeys(),
-  sortBy: () => db.notes.where('type').equals('meeting').reverse().sortBy('title').then((r) => r.map((x) => x.id)),
+  sortBy: () => db.notes.where('type').equals('ink').reverse().sortBy('title').then((r) => r.map((x) => x.id)),
   compound: () => db.notes.where('[type+archived+deletedAt]').equals(['text', 0, 0]).filter(() => true).primaryKeys(),
   offset: () => db.notes.orderBy('updatedAt').offset(5).limit(10).primaryKeys(),
   recent: () => recentNotes(9).then((r) => r.map((x) => x.id)),
@@ -45,9 +45,9 @@ describe('Cursor-Ausweichweg (Safari „Unable to open cursor“)', () => {
 
   it('modify() funktioniert im Ausweichweg', async () => {
     __forceCursorFallback(true);
-    await db.notes.where('type').equals('meeting').filter(() => true).modify({ pinned: 1 });
+    await db.notes.where('type').equals('ink').filter(() => true).modify({ pinned: 1 });
     __forceCursorFallback(false);
-    const ms = await db.notes.where('type').equals('meeting').toArray();
+    const ms = await db.notes.where('type').equals('ink').toArray();
     expect(ms.length).toBeGreaterThan(0);
     expect(ms.every((m) => m.pinned === 1)).toBe(true);
   });

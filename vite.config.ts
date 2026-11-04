@@ -32,7 +32,8 @@ export default defineConfig({
         globPatterns: ['**/*.{js,mjs,css,html,png,svg,ico,woff2}'],
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         navigateFallback: 'index.html',
-        // Bei der Erstinstallation sofort die Kontrolle übernehmen (Updates bleiben bestätigungspflichtig)
+        // Bei der Erstinstallation sofort die Kontrolle übernehmen. Updates übernimmt src/main.tsx automatisch,
+        // sobald die App in den Hintergrund geht (nie mitten im Schreiben).
         clientsClaim: true,
         cleanupOutdatedCaches: true
       }

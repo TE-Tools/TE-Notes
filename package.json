@@ -1,7 +1,7 @@
 {
   "name": "te-notes",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "TE Notes – Dein digitales Arbeitsgedächtnis. Eine Marke von TE Digital.",
   "type": "module",
   "scripts": {
