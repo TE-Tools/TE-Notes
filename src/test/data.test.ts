@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { __setDb, db, TeNotesDB } from '../db/db';
 import {
   addAttachment, archiveNote, createNote, createTask, deleteCategory, deleteNotePermanently, ensureSeeded,
-  recentNotes, restoreNote, saveCategory, saveNoteBody, saveProject, trashNote, updateNote, updateTask
+  recentNotes, restoreNote, saveCategory, saveFolder, saveNoteBody, saveProject, trashNote, updateNote, updateTask
 } from '../db/repo';
 import { search } from '../lib/search';
 import { analyzeImport, applyImport, exportFullBackup, exportNotes, migrateBackup, parseBackup } from '../lib/backup';
@@ -149,6 +149,17 @@ describe('Sicherung', () => {
 
   it('lehnt ungültige Dateien ab', async () => {
     await expect(parseBackup(new Blob(['kein zip']))).rejects.toThrow(/keine gültige/);
+  });
+});
+
+describe('Stammdaten', () => {
+  it('legt Projekte, Kategorien und Ordner auch mit id: undefined aus Formularen an', async () => {
+    const p = await saveProject({ id: undefined, name: 'Neues Projekt' });
+    expect((await db.projects.get(p))?.name).toBe('Neues Projekt');
+    const c = await saveCategory({ id: undefined, name: 'Neue Kategorie' });
+    expect((await db.categories.get(c))?.name).toBe('Neue Kategorie');
+    const f = await saveFolder({ id: undefined, name: 'Neuer Ordner' });
+    expect((await db.folders.get(f))?.name).toBe('Neuer Ordner');
   });
 });
 

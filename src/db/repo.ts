@@ -380,10 +380,12 @@ export async function saveProject(p: Partial<Project> & { name: string }): Promi
     });
     return id;
   }
+  // `id: undefined` aus Formularen darf die neue ID nicht überschreiben
+  const { id: _ignore, ...rest } = p;
   const id = uid();
   const count = await db.projects.count();
   await db.projects.add({
-    id, description: '', status: 'aktiv', color: COLORS[count % COLORS.length], createdAt: now, updatedAt: now, ...p
+    description: '', status: 'aktiv', color: COLORS[count % COLORS.length], createdAt: now, updatedAt: now, ...rest, id
   });
   return id;
 }
@@ -410,9 +412,10 @@ export async function saveCategory(c: Partial<Category> & { name: string }): Pro
     });
     return id;
   }
+  const { id: _ignore, ...rest } = c;
   const id = uid();
   const count = await db.categories.count();
-  await db.categories.add({ id, color: COLORS[count % COLORS.length], createdAt: now, updatedAt: now, ...c });
+  await db.categories.add({ color: COLORS[count % COLORS.length], createdAt: now, updatedAt: now, ...rest, id });
   return id;
 }
 
@@ -437,8 +440,9 @@ export async function saveFolder(f: Partial<Folder> & { name: string }): Promise
     });
     return id;
   }
+  const { id: _ignore, ...rest } = f;
   const id = uid();
-  await db.folders.add({ id, createdAt: now, updatedAt: now, ...f });
+  await db.folders.add({ createdAt: now, updatedAt: now, ...rest, id });
   return id;
 }
 

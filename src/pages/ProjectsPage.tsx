@@ -10,7 +10,7 @@ import { useLookups } from '../lib/hooks';
 import { COLORS } from '../lib/util';
 import { NoteRow, useCreateNote } from '../components/NoteItems';
 import { TaskModal, TaskRow } from '../components/TaskItems';
-import { confirmDialog, Empty, MenuButton, Modal, toast } from '../components/ui';
+import { confirmDialog, Empty, MenuButton, Modal, toast, toastError } from '../components/ui';
 import { SidebarToggle } from '../components/Layout';
 
 export function ProjectModal({ project, onClose }: { project?: Project; onClose: (id?: string) => void }) {
@@ -20,8 +20,12 @@ export function ProjectModal({ project, onClose }: { project?: Project; onClose:
   const [color, setColor] = useState(project?.color ?? COLORS[Math.floor(Math.random() * COLORS.length)]);
   const save = async () => {
     if (!name.trim()) return;
-    const id = await saveProject({ id: project?.id, name: name.trim(), description, status, color });
-    onClose(id);
+    try {
+      const id = await saveProject({ id: project?.id, name: name.trim(), description, status, color });
+      onClose(id);
+    } catch (e) {
+      toastError(e, 'Projekt konnte nicht gespeichert werden');
+    }
   };
   return (
     <Modal
