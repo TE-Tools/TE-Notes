@@ -38,6 +38,15 @@ const HL_SIZES = [12, 18, 28];
 const ERASER_SIZES = [6, 14, 28];
 const HL_COLORS = ['#f7d038', '#7ee081', '#6fc3f7', '#f78fb3'];
 const MIN_ZOOM = 0.3;
+/** Fingereingaben so lange nach Stift-Aktivität (auch Schweben) ignorieren – Handballen-Schutz */
+const PEN_GUARD_MS = 700;
+/** Setzt der Stift so kurz nach dem Auflegen der Hand auf, werden Verschieben/Finger-Strich zurückgenommen */
+const PALM_REVERT_MS = 900;
+/** Mindestbewegung, bevor ein Finger die Seite verschiebt */
+const PAN_SLOP_PX = 14;
+/** Antippen (Aufgaben-Kästchen): höchstens so lang und so weit bewegt */
+const TAP_MAX_MS = 350;
+const TAP_SLOP_PX = 10;
 const MAX_ZOOM = 6;
 
 interface View {
@@ -244,6 +253,7 @@ export function InkEditor({ note }: { note: Note }) {
   }
 
   // Aktueller Strich
+  const lastAddedStrokeId = useRef('');
   const drawingRef = useRef<{ pointerId: number; pageIdx: number; stroke: Stroke; isTouch: boolean } | null>(null);
 
   function renderLive() {
@@ -452,11 +462,19 @@ export function InkEditor({ note }: { note: Note }) {
   /* ---------------------------------------------------------------- */
 
   const touches = useRef(new Map<number, { x: number; y: number }>());
-  const panRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  /** Finger-Verschieben: startet erst nach einer Mindestbewegung (kurzes Antippen/Auflegen verschiebt nicht) */
+  const panRef = useRef<{ pointerId: number; x: number; y: number; armed: boolean; x0: number; y0: number } | null>(null);
+  /** Ansicht beim Auflegen des ersten Fingers – wird zurückgesetzt, wenn kurz danach der Stift aufsetzt (Handballen) */
+  const touchStartView = useRef<{ t: number; v: View } | null>(null);
+  /** Antippen mit dem Finger (Aufgaben-Kästchen): wird erst beim Loslassen ausgewertet */
+  const tapRef = useRef<{ pointerId: number; x: number; y: number; t: number } | null>(null);
+  /** Zuletzt mit dem Finger gezeichneter Strich (wird verworfen, wenn gleich danach der Stift aufsetzt) */
+  const lastTouchStroke = useRef<{ pageId: string; strokeId: string; t: number } | null>(null);
+  /** Letzte Stift-Aktivität (auch Schweben des Apple Pencil über dem Display) */
+  const lastPenActivity = useRef(0);
   const pinchRef = useRef<{ d0: number; z0: number; wx: number; wy: number } | null>(null);
   const eraseRef = useRef<{ pointerId: number; items: { pageId: string; stroke: Stroke; index: number }[] } | null>(null);
   const penDown = useRef(false);
-  const lastPenUp = useRef(0);
 
   const isDrawTool = (t: Tool) => t === 'pen' || t === 'highlighter' || t === 'eraser';
 
@@ -499,7 +517,7 @@ export function InkEditor({ note }: { note: Note }) {
   };
 
   /** Tippen auf ein Aufgaben-Kästchen: Haken setzen/entfernen. true, wenn getroffen. */
-  const toggleTaskAt = (clientX: number, clientY: number) => {
+  const toggleTaskAt = (clientX: number, clientY: number, dryRun = false) => {
     const w = toWorld(clientX, clientY);
     const idx = pageAt(w.x, w.y);
     if (idx < 0) return false;
@@ -507,11 +525,13 @@ export function InkEditor({ note }: { note: Note }) {
     const tol = 10 / Math.max(0.6, viewRef.current.z);
     const ctrl = hitTaskControl(page, w.x, w.y - top, tol);
     if (ctrl && page.tasks) {
+      if (dryRun) return true;
       resizeTaskArea(page, page.tasks.rows + (ctrl === 'add' ? 1 : -1));
       return true;
     }
     const row = hitTaskBox(page, w.x, w.y - top, tol);
     if (row < 0 || !page.tasks) return false;
+    if (dryRun) return true;
     const before = page.tasks;
     let after: InkTaskArea;
     if (before.carried?.[row] && !before.checked[row]) {
@@ -583,6 +603,7 @@ export function InkEditor({ note }: { note: Note }) {
     }
     applyCommand({ t: 'add', pageId, stroke }, false);
     pushCommand({ t: 'add', pageId, stroke });
+    lastAddedStrokeId.current = stroke.id;
     renderLive();
   };
 
@@ -649,12 +670,15 @@ export function InkEditor({ note }: { note: Note }) {
       const isPen = e.pointerType === 'pen';
 
       if (isTouch) {
-        // Handballen-Erkennung: während der Stift schreibt oder kurz danach keine Fingereingaben
-        if (penDown.current || Date.now() - lastPenUp.current < 300) return;
+        // Handballen-Erkennung: während der Stift schreibt, kurz danach oder während er über dem Display
+        // schwebt (Apple Pencil mit Schwebe-Erkennung) keine Fingereingaben
+        if (penDown.current || Date.now() - lastPenActivity.current < PEN_GUARD_MS) return;
         // Nur sehr große Auflageflächen (Handballen) ignorieren – Finger auf dem iPad melden bis ca. 80 px
         if (e.width * e.height > 12000) return;
         try { el.setPointerCapture(e.pointerId); } catch { /* synthetische Zeiger */ }
         touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (touches.current.size === 1) touchStartView.current = { t: Date.now(), v: { ...viewRef.current } };
+        tapRef.current = null;
         if (touches.current.size === 2) {
           // Zweiter Finger: begonnenen Finger-Strich verwerfen und Zoomen
           if (drawingRef.current?.isTouch) {
@@ -666,8 +690,12 @@ export function InkEditor({ note }: { note: Note }) {
           return;
         }
         if (touches.current.size > 2) return;
-        if (touches.current.size === 1 && t !== 'hand' && t !== 'eraser' && toggleTaskAt(e.clientX, e.clientY)) return;
         const fingerDraws = optsRef.current.fingerDraws && t !== 'hand' && t !== 'select';
+        // Aufgaben-Kästchen: nur bei bewusstem Antippen (kurz, ohne Bewegung) – ausgewertet beim Loslassen
+        if (t !== 'hand' && t !== 'eraser' && toggleTaskAt(e.clientX, e.clientY, true)) {
+          tapRef.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() };
+          if (fingerDraws) return;
+        }
         if (fingerDraws) {
           if (t === 'eraser') {
             eraseRef.current = { pointerId: e.pointerId, items: [] };
@@ -675,9 +703,9 @@ export function InkEditor({ note }: { note: Note }) {
           } else startStroke(e, true);
         } else if (t === 'select') {
           selectAt(e.clientX, e.clientY);
-          panRef.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY };
+          panRef.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, armed: true, x0: e.clientX, y0: e.clientY };
         } else {
-          panRef.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY };
+          panRef.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, armed: false, x0: e.clientX, y0: e.clientY };
         }
         return;
       }
@@ -687,13 +715,37 @@ export function InkEditor({ note }: { note: Note }) {
       try { el.setPointerCapture(e.pointerId); } catch { /* synthetische Zeiger */ }
       if (isPen) {
         penDown.current = true;
-        // eventuelles Verschieben durch aufliegende Hand abbrechen
+        lastPenActivity.current = Date.now();
+        // Handballen lag zuerst auf: alle Finger-Aktionen abbrechen und rückgängig machen
+        const now = Date.now();
+        const sv = touchStartView.current;
+        if (touches.current.size && sv && now - sv.t < PALM_REVERT_MS) {
+          viewRef.current = { ...sv.v };
+          clampView();
+          setZoomPct(Math.round(viewRef.current.z * 100));
+          requestRender();
+        }
+        touchStartView.current = null;
         touches.current.clear();
         pinchRef.current = null;
+        tapRef.current = null;
+        if (drawingRef.current?.isTouch) drawingRef.current = null;
+        if (eraseRef.current && eraseRef.current.pointerId !== e.pointerId) eraseRef.current = null;
         if (panRef.current && panRef.current.pointerId !== e.pointerId) panRef.current = null;
+        // Gerade eben mit dem Finger/Handballen gezeichneten Strich verwerfen
+        const lt = lastTouchStroke.current;
+        lastTouchStroke.current = null;
+        if (lt && now - lt.t < PALM_REVERT_MS) {
+          const top = undoRef.current[undoRef.current.length - 1];
+          if (top?.t === 'add' && top.stroke.id === lt.strokeId) {
+            undoRef.current.pop();
+            applyCommand(top, true);
+            setHistoryVersion((v) => v + 1);
+          }
+        }
       }
       if (t === 'hand' || e.button === 1 || spaceDown.current) {
-        panRef.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY };
+        panRef.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, armed: true, x0: e.clientX, y0: e.clientY };
         return;
       }
       if (t !== 'eraser' && !(isPen && e.button === 5) && toggleTaskAt(e.clientX, e.clientY)) return;
@@ -707,6 +759,7 @@ export function InkEditor({ note }: { note: Note }) {
     };
 
     const onMove = (e: PointerEvent) => {
+      if (e.pointerType === 'pen') lastPenActivity.current = Date.now();
       if (e.pointerType === 'touch' && touches.current.has(e.pointerId)) {
         touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
         if (pinchRef.current && touches.current.size >= 2) {
@@ -733,6 +786,15 @@ export function InkEditor({ note }: { note: Note }) {
         return;
       }
       if (panRef.current && panRef.current.pointerId === e.pointerId) {
+        const pr = panRef.current;
+        if (!pr.armed) {
+          // Erst ab einer deutlichen Bewegung verschieben (leichtes Berühren/Auflegen bleibt folgenlos)
+          if (Math.hypot(e.clientX - pr.x0, e.clientY - pr.y0) < PAN_SLOP_PX) return;
+          pr.armed = true;
+          pr.x = e.clientX;
+          pr.y = e.clientY;
+          return;
+        }
         const v = viewRef.current;
         v.x -= (e.clientX - panRef.current.x) / v.z;
         v.y -= (e.clientY - panRef.current.y) / v.z;
@@ -747,18 +809,30 @@ export function InkEditor({ note }: { note: Note }) {
     const onUp = (e: PointerEvent) => {
       if (e.pointerType === 'pen') {
         penDown.current = false;
-        lastPenUp.current = Date.now();
+        lastPenActivity.current = Date.now();
       }
       if (e.pointerType === 'touch') {
+        const known = touches.current.has(e.pointerId);
         touches.current.delete(e.pointerId);
         if (touches.current.size < 2) pinchRef.current = null;
         if (touches.current.size === 1 && !drawingRef.current) {
           // Weiter verschieben mit verbleibendem Finger
           const [[id, pt]] = [...touches.current.entries()];
-          panRef.current = { pointerId: id, x: pt.x, y: pt.y };
+          panRef.current = { pointerId: id, x: pt.x, y: pt.y, armed: true, x0: pt.x, y0: pt.y };
         }
+        const tap = tapRef.current;
+        if (tap && tap.pointerId === e.pointerId) {
+          tapRef.current = null;
+          const quick = Date.now() - tap.t < TAP_MAX_MS && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < TAP_SLOP_PX;
+          if (known && quick && e.type === 'pointerup' && Date.now() - lastPenActivity.current > PEN_GUARD_MS) toggleTaskAt(tap.x, tap.y);
+        }
+        if (touches.current.size === 0) touchStartView.current = null;
       }
-      if (drawingRef.current && drawingRef.current.pointerId === e.pointerId) finishStroke();
+      if (drawingRef.current && drawingRef.current.pointerId === e.pointerId) {
+        const d = drawingRef.current;
+        finishStroke();
+        if (d.isTouch) lastTouchStroke.current = { pageId: layoutRef.current[d.pageIdx]?.page.id ?? '', strokeId: lastAddedStrokeId.current, t: Date.now() };
+      }
       if (eraseRef.current && eraseRef.current.pointerId === e.pointerId) {
         if (eraseRef.current.items.length) pushCommand({ t: 'erase', items: eraseRef.current.items });
         eraseRef.current = null;
@@ -792,6 +866,7 @@ export function InkEditor({ note }: { note: Note }) {
       if (e.touches.length === 0) {
         touches.current.clear();
         pinchRef.current = null;
+        touchStartView.current = null;
         if (panRef.current && !penDown.current) panRef.current = null;
       } else if (e.touches.length < 2) pinchRef.current = null;
     };
